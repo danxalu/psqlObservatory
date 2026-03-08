@@ -1,0 +1,1795 @@
+<!DOCTYPE html>
+
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PostgreSQL Observatory — интерактивный туториал</title>
+<style>
+    :root {
+      --bg: #07111f;
+      --bg-2: #0d1730;
+      --panel: rgba(15, 22, 40, 0.84);
+      --panel-2: rgba(20, 30, 56, 0.96);
+      --line: rgba(255,255,255,.09);
+      --text: #edf4ff;
+      --muted: #a7b6d8;
+      --accent: #7aa7ff;
+      --accent-2: #4fe2bf;
+      --accent-3: #ffc965;
+      --danger: #ff7f9a;
+      --ok: #79de8e;
+      --radius: 24px;
+      --shadow: 0 24px 60px rgba(0,0,0,.28);
+      --maxw: 1320px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(122,167,255,.18), transparent 30%),
+        radial-gradient(circle at 100% 20%, rgba(79,226,191,.14), transparent 26%),
+        linear-gradient(180deg, var(--bg), var(--bg-2));
+      min-height: 100vh;
+    }
+
+    img { max-width: 100%; display: block; }
+    a { color: inherit; text-decoration: none; }
+    code { color: #d7e8ff; }
+    .container { width: min(var(--maxw), calc(100% - 28px)); margin: 0 auto; }
+    .glass {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+      border-radius: var(--radius);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: linear-gradient(180deg, rgba(7,17,31,.95), rgba(7,17,31,.72));
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+
+    .topbar-inner {
+      padding: 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 14px 28px rgba(122,167,255,.25);
+      display: grid;
+      place-items: center;
+      color: #08111d;
+      font-weight: 900;
+    }
+
+    .top-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    button {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      border-radius: 16px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      transition: .2s ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    .primary { background: linear-gradient(135deg, var(--accent), #a5bbff); color: #09111f; }
+    .secondary { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid var(--line); }
+
+    .hero {
+      padding: 26px 0 16px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.12fr .88fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .hero-main, .hero-side { padding: 26px; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(122,167,255,.28);
+      background: rgba(122,167,255,.12);
+      color: #dce8ff;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 14px 0 10px;
+      font-size: clamp(34px, 5vw, 66px);
+      line-height: .98;
+      letter-spacing: -.04em;
+    }
+
+    .lead {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.74;
+      font-size: 17px;
+      max-width: 78ch;
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric-tile {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      min-height: 92px;
+    }
+
+    .metric-tile b { display: block; font-size: 28px; margin-bottom: 6px; }
+    .metric-tile span { color: var(--muted); font-size: 13px; }
+
+    .hero-diagram {
+      margin-top: 18px;
+      border-radius: 24px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.08);
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.02));
+    }
+
+    .hero-side {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+
+    .screen {
+      background: #07121f;
+      border: 1px solid rgba(122,167,255,.15);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    .screen-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.04);
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: rgba(255,255,255,.25); }
+    .screen-body {
+      padding: 14px;
+      color: #d3e7ff;
+      font-size: 13px;
+      line-height: 1.62;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .side-note {
+      padding: 16px;
+      border-radius: 20px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+      padding: 10px 0 40px;
+    }
+
+    aside.sidebar {
+      position: sticky;
+      top: 88px;
+      align-self: start;
+      height: fit-content;
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--line);
+    }
+
+    .bar > div {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent));
+      transition: width .3s ease;
+    }
+
+    .nav-title { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    .nav-list { display: grid; gap: 10px; }
+    .nav-link {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.06);
+      color: var(--text);
+    }
+    .nav-link:hover, .nav-link.active {
+      background: rgba(122,167,255,.22);
+      border-color: rgba(122,167,255,.42);
+      box-shadow: inset 0 0 0 1px rgba(122,167,255,.18), 0 0 0 1px rgba(122,167,255,.06);
+    }
+    .nav-link span:first-child {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      flex: 0 0 auto;
+    }
+
+    .matryoshka-card {
+      padding: 16px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    }
+
+    .shell {
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 20px;
+      border: 1px dashed rgba(255,255,255,.14);
+      background: rgba(122,167,255,.05);
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    main { display: grid; gap: 22px; }
+    section.level {
+      padding: 24px;
+      scroll-margin-top: 92px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    h2 {
+      margin: 8px 0 10px;
+      font-size: clamp(26px, 3vw, 38px);
+      line-height: 1.08;
+      letter-spacing: -.03em;
+    }
+
+    .section-copy {
+      color: var(--muted);
+      line-height: 1.68;
+      max-width: 80ch;
+      margin: 0;
+    }
+
+    .tag-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tag {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.05);
+      color: #dce6ff;
+      font-size: 12px;
+    }
+
+    .grid-2, .grid-3 {
+      display: grid;
+      gap: 18px;
+    }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: 1fr; }
+
+    .card {
+      padding: 18px;
+      background: var(--panel-2);
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      min-width: 0;
+    }
+
+    .card h3 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      letter-spacing: -.02em;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      line-height: 1.66;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .stat-box {
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--line);
+      font-size: 14px;
+      color: #d8e6ff;
+    }
+
+    .visual {
+      display: grid;
+      gap: 12px;
+    }
+
+    .image-frame {
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.03);
+    }
+
+    .image-caption {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .tab-btn {
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+
+    .tab-btn.active {
+      background: rgba(79,226,191,.16);
+      border-color: rgba(79,226,191,.32);
+      color: #f0fff9;
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .quiz { display: grid; gap: 14px; }
+    .question {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+    }
+    .question p { margin: 0 0 10px; font-weight: 700; }
+    .answers { display: grid; gap: 8px; }
+    .answer {
+      padding: 11px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.03);
+      cursor: pointer;
+      color: #dce6ff;
+      transition: .18s ease;
+    }
+    .answer:hover { background: rgba(255,255,255,.05); }
+    .answer.correct { background: rgba(121,222,142,.12); border-color: rgba(121,222,142,.46); }
+    .answer.wrong { background: rgba(255,127,154,.12); border-color: rgba(255,127,154,.42); }
+    .feedback { min-height: 20px; margin-top: 8px; color: var(--muted); font-size: 14px; }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .timeline-badge {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: rgba(122,167,255,.18);
+      border: 1px solid rgba(122,167,255,.34);
+      font-weight: 800;
+    }
+
+    .callout {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(255,201,101,.28);
+      background: rgba(255,201,101,.1);
+      color: #ffedc4;
+      line-height: 1.6;
+    }
+
+    .footer {
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .source-list {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      line-height: 1.68;
+    }
+
+    .source-list a {
+      text-decoration: underline;
+      text-decoration-color: rgba(255,255,255,.25);
+      text-underline-offset: 3px;
+    }
+
+    .kbd {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.05);
+      font-size: 12px;
+      color: #dce6ff;
+    }
+
+    
+    .text-quiz {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,.08);
+      display: grid;
+      gap: 14px;
+    }
+
+    .text-quiz h4 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: -.01em;
+    }
+
+    .text-question, .case-task {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      display: grid;
+      gap: 10px;
+    }
+
+    .text-question.correct, .case-task.correct {
+      border-color: rgba(121,222,142,.46);
+      background: rgba(121,222,142,.09);
+    }
+
+    .text-question.wrong, .case-task.wrong {
+      border-color: rgba(255,127,154,.42);
+      background: rgba(255,127,154,.08);
+    }
+
+    .text-question p, .case-task p {
+      margin: 0;
+      line-height: 1.65;
+      color: #e6f0ff;
+    }
+
+    .answer-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .text-input {
+      flex: 1 1 260px;
+      min-width: 0;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      padding: 12px 14px;
+      font: inherit;
+      outline: none;
+    }
+
+    .text-input::placeholder {
+      color: #8ea3c7;
+    }
+
+    .text-input:focus {
+      border-color: rgba(122,167,255,.45);
+      box-shadow: 0 0 0 3px rgba(122,167,255,.12);
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .case-lab {
+      display: grid;
+      gap: 14px;
+    }
+
+
+    @media (max-width: 1100px) {
+      .hero-grid, .grid-2, .grid-3, .footer-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 700px) {
+      .workspace { grid-template-columns: 1fr; }
+      aside.sidebar { position: static; }
+    }
+
+    @media (max-width: 740px) {
+      .container { width: min(var(--maxw), calc(100% - 18px)); }
+      .hero-main, .hero-side, section.level, .footer { padding: 18px; }
+      .hero-metrics, .stats-grid { grid-template-columns: 1fr 1fr; }
+      .top-actions, button { width: 100%; }
+      .top-actions button { flex: 1 1 auto; }
+    }
+
+    @media (max-width: 540px) {
+      .hero-metrics, .stats-grid { grid-template-columns: 1fr; }
+      .answer-row { flex-direction: column; }
+      .answer-row button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<header class="topbar">
+<div class="container topbar-inner">
+<div class="brand">
+<div class="brand-mark">PG</div>
+<div>PostgreSQL Observatory</div>
+</div>
+<div class="top-actions">
+<button class="primary" id="startLearning">Начать</button>
+<button class="secondary" id="openCases">Перейти к кейсам</button>
+<button class="secondary" id="resetProgress">Сбросить прогресс</button>
+</div>
+</div>
+</header>
+<section class="hero">
+<div class="container hero-grid">
+<div class="hero-main glass">
+<span class="eyebrow">Интерактивный туториал · PostgreSQL · мониторинг и отладка</span>
+<h1>PostgreSQL Observatory</h1>
+<p class="lead">
+          Этот одностраничный туториал показывает многоуровневую «матрёшку» средств наблюдаемости PostgreSQL: сначала ресурсы сервера, затем внешние дашборды, потом встроенные представления и планы запросов, далее расширения, а в самом центре — WAL, checkpoints, autovacuum, репликация и внутренние ожидания. На каждом уровне есть теория, визуальные примеры, практические команды и интерактивная проверка знаний.
+        </p>
+<div class="hero-metrics">
+<div class="metric-tile"><b>5</b><span>уровней айсберга</span></div>
+<div class="metric-tile"><b>15</b><span>контрольных вопросов</span></div>
+<div class="metric-tile"><b>30+</b><span>SQL и shell-примеров</span></div>
+</div>
+</div>
+<div class="hero-side glass">
+<div class="screen">
+<div class="screen-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+<div class="screen-body">$ top
+$ vmstat 1
+$ iostat -xz 1
+
+Postgres_exporter → Prometheus → Grafana → Alertmanager
+
+SELECT * FROM pg_stat_activity;
+SELECT * FROM pg_stat_io;
+EXPLAIN (ANALYZE, BUFFERS) ...
+SELECT * FROM pg_stat_statements;
+
+WAL → checkpoints → replication | autovacuum, wait events</div>
+</div>
+<div class="side-note">
+<strong>Как проходить:</strong> сначала смотрите симптом на уровне инфраструктуры, потом локализуйте его на уровне PostgreSQL, затем подтверждайте гипотезу через планы, расширения и низкоуровневые статистики. Такой порядок экономит время и помогает не «лечить» ложную причину.
+        </div>
+</div>
+</div>
+</section>
+<div class="container workspace">
+<aside class="sidebar glass">
+<div>
+<div class="progress-label"><span>Прогресс прохождения</span><strong id="progressText">0%</strong></div>
+<div class="bar"><div id="progressBar"></div></div>
+</div>
+<div>
+<div class="nav-title">Навигация</div>
+<nav class="nav-list" id="sideNav">
+<a class="nav-link" href="#level1"><span>1</span><span>ОС и хост</span></a>
+<a class="nav-link" href="#level2"><span>2</span><span>Prometheus и Grafana</span></a>
+<a class="nav-link" href="#level3"><span>3</span><span>Встроенные средства PostgreSQL</span></a>
+<a class="nav-link" href="#level4"><span>4</span><span>Расширения</span></a>
+<a class="nav-link" href="#level5"><span>5</span><span>Внутренняя телеметрия</span></a>
+<a class="nav-link" href="#cases"><span>★</span><span>Диагностические кейсы</span></a>
+</nav>
+</div>
+</aside>
+<main>
+<section class="level glass" id="level1">
+<div class="section-head">
+<div>
+<span class="eyebrow">Уровень 1</span>
+<h2>Мониторинг операционной системы и хоста</h2>
+<p class="section-copy">Это самый внешний слой. Здесь мы выясняем, хватает ли серверу CPU, памяти, IOPS, пропускной способности диска и сети. PostgreSQL часто выглядит «медленным» только потому, что ОС уже задыхается от ожидания диска, swap или сетевой деградации.</p>
+</div>
+<div class="tag-row">
+<span class="tag">top</span>
+<span class="tag">htop</span>
+<span class="tag">vmstat</span>
+<span class="tag">iostat</span>
+<span class="tag">pidstat</span>
+<span class="tag">ss</span>
+</div>
+</div>
+<div class="grid-3">
+<div class="card">
+<h3>Теоретический блок</h3>
+<div class="list">
+<div><strong>Категория инструментов:</strong> системные утилиты Linux/Unix и сборщики статистики, работающие вне PostgreSQL.</div>
+<div><strong>Ключевая идея:</strong> не пытаться объяснить любую деградацию через SQL, пока не проверены ресурсы узла.</div>
+<div><strong>Конкретные средства:</strong> <code>top</code>/<code>htop</code> для процессов, <code>vmstat</code> для памяти и scheduler, <code>iostat -xz</code> для диска, <code>pidstat</code> для профиля postgres-процессов, <code>ss</code> и <code>sar -n</code> для сети.</div>
+<div><strong>Что важно интерпретировать:</strong> <code>iowait</code> показывает долю времени CPU в ожидании I/O, а <code>await</code> в <code>iostat</code> помогает понять задержку дисковых операций. Если оба показателя нормальные, диск не выглядит главным узким местом.</div>
+</div>
+<div class="stats-grid">
+<div class="stat-box">CPU user/system/iowait</div>
+<div class="stat-box">load average</div>
+<div class="stat-box">free/cache/swap</div>
+<div class="stat-box">await / %util / svctm</div>
+</div>
+</div>
+<div class="card">
+<h3>Визуальный блок</h3>
+<div class="visual">
+<div class="screen">
+<div class="screen-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+<div class="screen-body">top - 16:33:17 up 14 days,  load average: 5.84, 5.12, 4.88
+%Cpu(s): 28.1 us, 10.2 sy, 33.4 id, 27.2 wa
+MiB Mem : 15894 total,  722 free, 11138 used, 4034 buff/cache
+MiB Swap:  2048 total,  1430 used
+
+PID USER     S  %CPU %MEM COMMAND
+2134 postgres S  89.2 13.1 postgres
+2135 postgres S  74.0 12.7 postgres</div>
+</div>
+<div class="image-frame">
+<svg height="100%" viewbox="0 0 520 220" width="100%" xmlns="http://www.w3.org/2000/svg">
+<rect fill="#09131f" height="220" width="520"></rect>
+<text fill="#dce8ff" font-size="16" x="24" y="28">Пример дашборда хоста</text>
+<line stroke="#29425e" x1="34" x2="480" y1="170" y2="170"></line>
+<line stroke="#29425e" x1="34" x2="34" y1="60" y2="170"></line>
+<polyline fill="none" points="40,150 90,120 140,130 190,80 240,70 290,65 340,95 390,88 440,40" stroke="#7aa7ff" stroke-width="4"></polyline>
+<polyline fill="none" points="40,165 90,160 140,154 190,152 240,140 290,120 340,108 390,84 440,72" stroke="#4fe2bf" stroke-width="4"></polyline>
+<text fill="#7aa7ff" font-size="14" x="352" y="32">Disk await</text>
+<text fill="#4fe2bf" font-size="14" x="352" y="52">Swap used</text>
+</svg>
+</div>
+<div class="image-caption">Здесь видно типичный паттерн: рост swap и disk await совпадает с жалобами на медленные запросы. Это сигнал сначала проверить ресурсную базу, а не менять индексы вслепую.</div>
+</div>
+</div>
+<div class="card">
+<h3>Практический блок</h3>
+<div class="tabs" data-tabs="l1">
+<button class="tab-btn active" data-tab="l1-1">CPU и память</button>
+<button class="tab-btn" data-tab="l1-2">Диск</button>
+<button class="tab-btn" data-tab="l1-3">Сеть</button>
+</div>
+<div class="tab-panel active" id="l1-1">
+<div class="screen"><div class="screen-body">top -Hp $(pgrep -d, postgres)
+vmstat 1
+free -h
+
+Интерпретация:
+• высокий us → CPU уходит в вычисления запросов
+• высокий wa → процессоры простаивают, ожидая диск
+• swap under load → памяти не хватает, latency растет</div></div>
+</div>
+<div class="tab-panel" id="l1-2">
+<div class="screen"><div class="screen-body">iostat -xz 1
+pidstat -d 1
+
+Проверяем:
+• await
+• %util
+• read/write throughput
+• всплески во время checkpoint или bulk load</div></div>
+</div>
+<div class="tab-panel" id="l1-3">
+<div class="screen"><div class="screen-body">ss -tpn | grep 5432
+sar -n DEV 1
+
+Ищем:
+• backlog по TCP
+• retransmits
+• saturation канала
+• долго висящие client connections</div></div>
+</div>
+<div class="callout">Полезная привычка: записывайте время всплеска и сразу сверяйте его потом с метриками PostgreSQL. Так легче строить причинно-следственную цепочку между инфраструктурой и SQL-нагрузкой.</div>
+</div>
+</div>
+<div class="card" style="margin-top:18px;">
+<h3>Самопроверка</h3>
+<div class="quiz" data-quiz="level1">
+<div class="question" data-correct="2">
+<p>1. Какой набор симптомов сильнее всего указывает на проблему с диском?</p>
+<div class="answers">
+<div class="answer">Низкий load average и свободная RAM</div>
+<div class="answer">Высокий iowait и рост await в iostat</div>
+<div class="answer">Наличие нескольких idle-сессий</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="1">
+<p>2. Почему нельзя начинать диагностику только с SQL?</p>
+<div class="answers">
+<div class="answer">Потому что часть проблем рождается на уровне ОС и железа</div>
+<div class="answer">Потому что PostgreSQL не умеет показывать статистику</div>
+<div class="answer">Потому что SQL ничего не сообщает о блокировках</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="3">
+<p>3. Что обычно означает активный swap под стабильной нагрузкой?</p>
+<div class="answers">
+<div class="answer">Процесс репликации → риск задержек транзакций</div>
+<div class="answer">Оптимизация чтения таблиц → ускорение выполнения транзакций</div>
+<div class="answer">Нехватка оперативной памяти → риск задержек транзакций</div>
+</div>
+<div class="feedback"></div>
+</div>
+</div>
+
+<div class="text-quiz">
+<h4>Открытый вопрос</h4>
+<div class="text-question" data-answers="iowait|await" data-key="level1-open" data-success="Да. В первую очередь смотрят iowait и/или await: они быстро подсказывают, упирается ли система в диск.">
+<p>4. Какой показатель в ОС стоит проверить первым, если вы подозреваете, что запросы тормозят из-за диска?</p>
+<div class="answer-row">
+<input class="text-input" placeholder="Например: swap" type="text"/>
+<button class="secondary check-text-btn" type="button">Проверить</button>
+</div>
+<div class="hint">Нужно отвечать коротко.</div>
+<div class="feedback"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="level glass" id="level2">
+<div class="section-head">
+<div>
+<span class="eyebrow">Уровень 2</span>
+<h2>Внешние системы мониторинга: Prometheus, Grafana, Alerting</h2>
+<p class="section-copy">На этом уровне метрики превращаются в временные ряды, графики и алерты. Здесь удобно видеть историю, а не только текущее состояние, и сопоставлять инфраструктуру с состоянием PostgreSQL в один и тот же момент.</p>
+</div>
+<div class="tag-row">
+<span class="tag">Prometheus</span>
+<span class="tag">Grafana</span>
+<span class="tag">postgres_exporter</span>
+<span class="tag">Alertmanager</span>
+<span class="tag">Zabbix</span>
+</div>
+</div>
+<div class="grid-3">
+<div class="card">
+<h3>Теоретический блок</h3>
+<div class="list">
+<div><strong>Prometheus</strong> забирает метрики по HTTP с exporters, хранит их и позволяет строить запросы на PromQL.</div>
+<div><strong>Grafana</strong> визуализирует метрики как дашборды и корреляции по времени.</div>
+<div><strong>Alertmanager</strong> доставляет уведомления в мессенджеры и почту, подавляет дубликаты и группирует алерты.</div>
+<div><strong>Postgres_exporter</strong> публикует метрики PostgreSQL: соединения, транзакции, репликацию, cache hit, background writer, WAL и другое.</div>
+</div>
+<div class="stats-grid">
+<div class="stat-box">connections / max_connections</div>
+<div class="stat-box">TPS / deadlocks / temp files</div>
+<div class="stat-box">replication lag</div>
+<div class="stat-box">cache hit / WAL rate</div>
+</div>
+</div>
+<div class="card">
+<h3>Визуальный блок</h3>
+<div class="image-frame">
+<svg height="100%" viewbox="0 0 520 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+<rect fill="#09131f" height="260" width="520"></rect>
+<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="128" x="24" y="30"></rect>
+<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="150" x="186" y="30"></rect>
+<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="122" x="374" y="30"></rect>
+<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="128" x="24" y="156"></rect>
+<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="122" x="199" y="156"></rect>
+<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="122" x="374" y="156"></rect>
+<text fill="#dce8ff" text-anchor="middle" x="88" y="67">PostgreSQL</text>
+<text fill="#dce8ff" text-anchor="middle" x="261" y="67">postgres_exporter</text>
+<text fill="#dce8ff" text-anchor="middle" x="435" y="67">Prometheus</text>
+<text fill="#dce8ff" text-anchor="middle" x="88" y="193">Node exporter</text>
+<text fill="#dce8ff" text-anchor="middle" x="260" y="193">Grafana</text>
+<text fill="#dce8ff" text-anchor="middle" x="435" y="193">Alertmanager</text>
+<path d="M152 61 H186" stroke="#7aa7ff" stroke-width="3"></path>
+<path d="M336 61 H374" stroke="#7aa7ff" stroke-width="3"></path>
+<path d="M152 187 H210 V124 H435 V92" stroke="#4fe2bf" stroke-width="3" fill="none"></path>
+<path d="M435 92 V156" stroke="#ffc965" stroke-width="3"></path>
+<path d="M435 92 V124 H260 V156" stroke="#7aa7ff" stroke-width="3" fill="none"></path>
+<text fill="#8fa9d6" font-size="13" text-anchor="middle" x="260" y="240">Архитектура внешнего мониторинга и алертинга</text>
+</svg>
+</div>
+<div class="image-caption">Схема показывает типовой поток метрик: exporters публикуют их, Prometheus собирает, Grafana визуализирует, Alertmanager уведомляет о пороговых или аномальных состояниях.</div>
+</div>
+<div class="card">
+<h3>Практический блок</h3>
+<div class="tabs" data-tabs="l2">
+<button class="tab-btn active" data-tab="l2-1">Prometheus</button>
+<button class="tab-btn" data-tab="l2-2">Dashboard</button>
+<button class="tab-btn" data-tab="l2-3">Alerts</button>
+</div>
+<div class="tab-panel active" id="l2-1">
+<div class="screen"><div class="screen-body">scrape_configs:
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['db01:9187']
+  - job_name: 'node'
+    static_configs:
+      - targets: ['db01:9100']</div></div>
+</div>
+<div class="tab-panel" id="l2-2">
+<div class="screen"><div class="screen-body">Рекомендуемый дашборд:
+• connections / max_connections
+• tps, commits, rollbacks
+• cache hit ratio
+• disk await рядом с pg IO
+• replication lag
+• wal generation rate
+• autovacuum activity</div></div>
+</div>
+<div class="tab-panel" id="l2-3">
+<div class="screen"><div class="screen-body">- alert: TooManyConnections
+  expr: pg_stat_activity_count / pg_settings_max_connections &gt; 0.85
+  for: 5m
+
+- alert: HighReplicationLag
+  expr: pg_replication_lag_seconds &gt; 10
+  for: 2m
+
+- alert: AutovacuumStuck
+  expr: pg_vacuum_oldest_xmin_age &gt; 2e9</div></div>
+</div>
+<div class="callout">Сильный дашборд — это не просто много графиков, а визуальные ряды, которые позволяют быстро проверить гипотезу: например, рост latency совпал с checkpoint burst, а не с ростом числа соединений.</div>
+</div>
+</div>
+<div class="card" style="margin-top:18px;">
+<h3>Самопроверка</h3>
+<div class="quiz" data-quiz="level2">
+<div class="question" data-correct="1">
+<p>1. Что делает exporter?</p>
+<div class="answers">
+<div class="answer">Отдает метрики для внешнего мониторинга</div>
+<div class="answer">Выдает кортежи по запросу</div>
+<div class="answer">Осуществляет механизм WAL</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="2">
+<p>2. Почему иногда совмещают на одном дашборде системные и Postgres- метрики?</p>
+<div class="answers">
+<div class="answer">Потому что так уменьшается нагрузка от сбора метрик</div>
+<div class="answer">Чтобы видеть корреляцию между ресурсами узла и поведением СУБД</div>
+<div class="answer">Потому что Grafana иначе не умеет строить панели</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="3">
+<p>3. Зачем используют alertmanager?</p>
+<div class="answers">
+<div class="answer">Чтобы сообщать о проблемах в работе Grafana ее разработчикам</div>
+<div class="answer">Потому что он собирает метрики для отображения в Grafana</div>
+<div class="answer">Чтобы отправлять уведомления при выполнении условий</div>
+</div>
+<div class="feedback"></div>
+</div>
+</div>
+
+<div class="text-quiz">
+<h4>Открытый вопрос</h4>
+<div class="text-question" data-answers="postgres_exporter|exporter" data-key="level2-open" data-success="Верно. Метрики наружу публикует exporter, в данном случае чаще всего postgres_exporter.">
+<p>4. Какой компонент в связке Prometheus + PostgreSQL отдаёт метрики PostgreSQL наружу?</p>
+<div class="answer-row">
+<input class="text-input" placeholder="Введите название компонента" type="text"/>
+<button class="secondary check-text-btn" type="button">Проверить</button>
+</div>
+<div class="hint">Нужно отвечать коротко.</div>
+<div class="feedback"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="level glass" id="level3">
+<div class="section-head">
+<div>
+<span class="eyebrow">Уровень 3</span>
+<h2>Встроенные средства PostgreSQL</h2>
+<p class="section-copy">На этом уровне начинается нативная диагностика самой базы: текущая активность сессий, статистика по базам, прогресс операций, I/O и планы выполнения. Это основной рабочий слой DBA и разработчика при разборе медленных запросов и блокировок.</p>
+</div>
+<div class="tag-row">
+<span class="tag">pg_stat_activity</span>
+<span class="tag">pg_stat_database</span>
+<span class="tag">pg_stat_io</span>
+<span class="tag">pg_stat_progress_*</span>
+<span class="tag">EXPLAIN</span>
+</div>
+</div>
+<div class="grid-3">
+<div class="card">
+<h3>Теоретический блок</h3>
+<div class="list">
+<div><strong>pg_stat_activity</strong> показывает серверные процессы, состояние сессии, текущий SQL и <em>wait events</em>.</div>
+<div><strong>pg_stat_database</strong> даёт агрегированную статистику по транзакциям, чтениям, temp files, deadlocks и конфликтам.</div>
+<div><strong>pg_stat_io</strong> помогает анализировать чтения и записи по backend type, context и object.</div>
+<div><strong>pg_stat_progress_*</strong> показывает прогресс VACUUM, CREATE INDEX, COPY, ANALYZE и других долгих операций.</div>
+<div><strong>EXPLAIN (ANALYZE, BUFFERS)</strong> раскрывает реальный путь выполнения запроса.</div>
+</div>
+<div class="stats-grid">
+<div class="stat-box">state / wait_event</div>
+<div class="stat-box">xact_commit / rollback</div>
+<div class="stat-box">reads / writes / write_time</div>
+<div class="stat-box">estimated rows vs actual rows</div>
+</div>
+</div>
+<div class="card">
+<h3>Визуальный блок</h3>
+<div class="screen">
+<div class="screen-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+<div class="screen-body">SELECT pid, usename, state, wait_event_type, wait_event, now() - query_start AS runtime
+FROM pg_stat_activity
+WHERE state &lt;&gt; 'idle'
+ORDER BY runtime DESC;
+
+ pid  | usename | state  | wait_event_type | wait_event       | runtime
+------+---------+--------+-----------------+------------------+----------
+ 8121 | app     | active | IO              | DataFileRead     | 00:00:14
+ 8127 | app     | active | Lock            | transactionid    | 00:00:09</div>
+</div>
+<div class="image-frame" style="margin-top:12px;">
+<svg height="100%" viewbox="0 0 520 220" width="100%" xmlns="http://www.w3.org/2000/svg">
+<rect fill="#09131f" height="220" width="520"></rect>
+<text fill="#dce8ff" font-size="16" x="20" y="28">Разбор плана запроса</text>
+<rect fill="#102038" height="34" rx="12" stroke="#36527c" width="460" x="28" y="52"></rect>
+<text fill="#dce8ff" font-size="14" x="44" y="73">Limit  (actual time=0.311..0.325 rows=20 loops=1)</text>
+<rect fill="#11253f" height="34" rx="12" stroke="#45618f" width="392" x="62" y="102"></rect>
+<text fill="#dce8ff" font-size="14" x="78" y="123">Index Scan using idx_orders_customer_created</text>
+<rect fill="#16304f" height="34" rx="12" stroke="#5c82c7" width="312" x="102" y="152"></rect>
+<text fill="#dce8ff" font-size="14" x="118" y="173">Buffers: shared hit=48 read=2</text>
+</svg>
+</div>
+<div class="image-caption">В идеале actual rows и actual time должны быть предсказуемы, а неожиданный Seq Scan или сильное расхождение estimates с actual — повод копать статистику и индексы.</div>
+</div>
+<div class="card">
+<h3>Практический блок</h3>
+<div class="tabs" data-tabs="l3">
+<button class="tab-btn active" data-tab="l3-1">Активность</button>
+<button class="tab-btn" data-tab="l3-2">I/O</button>
+<button class="tab-btn" data-tab="l3-3">Планы</button>
+</div>
+<div class="tab-panel active" id="l3-1">
+<div class="screen"><div class="screen-body">SELECT state, count(*)
+FROM pg_stat_activity
+GROUP BY state;
+
+SELECT pid, wait_event_type, wait_event, now() - query_start AS runtime, query
+FROM pg_stat_activity
+WHERE state = 'active'
+ORDER BY runtime DESC
+LIMIT 20;</div></div>
+</div>
+<div class="tab-panel" id="l3-2">
+<div class="screen"><div class="screen-body">SELECT backend_type, object, context, reads, writes, read_time, write_time
+FROM pg_stat_io
+ORDER BY write_time DESC NULLS LAST
+LIMIT 10;
+
+SELECT datname, xact_commit, xact_rollback, blks_hit, blks_read, temp_files, deadlocks
+FROM pg_stat_database;</div></div>
+</div>
+<div class="tab-panel" id="l3-3">
+<div class="screen"><div class="screen-body">EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
+SELECT *
+FROM orders
+WHERE customer_id = 42
+ORDER BY created_at DESC
+LIMIT 20;
+
+Смотрите на:
+• rows estimated vs actual
+• timing по узлам
+• shared/local/temp blocks
+• неожиданные scans или rechecks</div></div>
+</div>
+<div class="callout">При long-running запросах полезно сначала смотреть <code>pg_stat_activity</code>, потом планы, а уже затем расширения. Это позволяет быстро понять: проблема в блокировке, в I/O, в плохом плане или во внешнем давлении на сервер.</div>
+</div>
+</div>
+<div class="card" style="margin-top:18px;">
+<h3>Самопроверка</h3>
+<div class="quiz" data-quiz="level3">
+<div class="question" data-correct="2">
+<p>1. Где смотреть текущие активные запросы и их wait events?</p>
+<div class="answers">
+<div class="answer">В pg_dump</div>
+<div class="answer">В pg_stat_activity</div>
+<div class="answer">В pg_stat_statements</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="3">
+<p>2. Для чего нужен EXPLAIN (ANALYZE, BUFFERS)?</p>
+<div class="answers">
+<div class="answer">Для вызова документации по ANALYZE, BUFFERS</div>
+<div class="answer">Для просмотра конфигураций базы данных</div>
+<div class="answer">Для анализа плана запроса и обращений к буферам</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="1">
+<p>3. Какая пара метрик помогает оценить cache hit ratio?</p>
+<div class="answers">
+<div class="answer">blks_hit и blks_read</div>
+<div class="answer">wal_bytes и wal_fpi</div>
+<div class="answer">archive_mode и active_mode</div>
+</div>
+<div class="feedback"></div>
+</div>
+</div>
+
+<div class="text-quiz">
+<h4>Открытый вопрос</h4>
+<div class="text-question" data-answers="pg_stat_activity" data-key="level3-open" data-success="Верно. pg_stat_activity — главная точка входа для разбора активных сессий и wait events.">
+<p>4. Какое системное представление PostgreSQL вы откроете первым, чтобы увидеть активные запросы и их ожидания?</p>
+<div class="answer-row">
+<input class="text-input" placeholder="Введите имя представления" type="text"/>
+<button class="secondary check-text-btn" type="button">Проверить</button>
+</div>
+<div class="hint">Нужно отвечать коротко.</div>
+<div class="feedback"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="level glass" id="level4">
+<div class="section-head">
+<div>
+<span class="eyebrow">Уровень 4</span>
+<h2>Расширения и плагины PostgreSQL</h2>
+<p class="section-copy">Этот уровень нужен, когда стандартной статистики уже мало. Расширения позволяют собирать агрегаты по запросам, автоматически сохранять планы медленных SQL, анализировать bloat, видимость страниц и состояние buffer cache.</p>
+</div>
+<div class="tag-row">
+<span class="tag">pg_stat_statements</span>
+<span class="tag">auto_explain</span>
+<span class="tag">pgstattuple</span>
+<span class="tag">pg_visibility</span>
+<span class="tag">pg_buffercache</span>
+</div>
+</div>
+<div class="grid-3">
+<div class="card">
+<h3>Теоретический блок</h3>
+<div class="list">
+<div><strong>pg_stat_statements</strong> агрегирует planning/execution statistics по нормализованным SQL и помогает найти тяжёлые запросы не по одному запуску, а по совокупному влиянию.</div>
+<div><strong>auto_explain</strong> автоматически пишет планы медленных запросов в лог, включая <code>ANALYZE</code> и буферы.</div>
+<div><strong>pgstattuple</strong> помогает оценить bloat таблиц и индексов, долю dead tuples и реальную плотность хранения.</div>
+<div><strong>pg_visibility</strong> показывает состояние visibility map и помогает понимать, насколько эффективно vacuum поддерживает видимость страниц.</div>
+<div><strong>pg_buffercache</strong> позволяет посмотреть, что именно держится в shared buffers.</div>
+</div>
+<div class="stats-grid">
+<div class="stat-box">calls / total_exec_time</div>
+<div class="stat-box">total_plan_time</div>
+<div class="stat-box">dead_tuple_percent</div>
+<div class="stat-box">buffer residency</div>
+</div>
+</div>
+<div class="card">
+<h3>Визуальный блок</h3>
+<div class="screen">
+<div class="screen-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+<div class="screen-body">SELECT query, calls, total_exec_time, mean_exec_time, rows,
+       shared_blks_hit, shared_blks_read
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 5;
+
+query                      | calls | total_exec_time | mean_exec_time
+--------------------------+-------+-----------------+----------------
+SELECT ... orders ...     | 15420 | 92820 ms        | 6.0 ms</div>
+</div>
+<div class="image-frame" style="margin-top:12px;">
+<svg height="100%" viewbox="0 0 520 220" width="100%" xmlns="http://www.w3.org/2000/svg">
+<rect fill="#09131f" height="220" width="520"></rect>
+<text fill="#dce8ff" font-size="16" x="22" y="28">auto_explain и поиск bloat</text>
+<rect fill="#11233b" height="48" rx="14" stroke="#3d5983" width="220" x="26" y="50"></rect>
+<text fill="#dce8ff" text-anchor="middle" x="136" y="78">slow query log</text>
+<rect fill="#11233b" height="48" rx="14" stroke="#3d5983" width="220" x="274" y="50"></rect>
+<text fill="#dce8ff" text-anchor="middle" x="384" y="78">pgstattuple()</text>
+<path d="M136 98 V154" stroke="#4fe2bf" stroke-width="3"></path>
+<path d="M384 98 V154" stroke="#7aa7ff" stroke-width="3"></path>
+<rect fill="#16304f" height="44" rx="16" stroke="#5c82c7" width="328" x="82" y="154"></rect>
+<text fill="#dce8ff" text-anchor="middle" x="246" y="181">Тюнинг SQL, таблиц и индексов</text>
+</svg>
+</div>
+<div class="image-caption">Расширения особенно полезны там, где стандартные views показывают симптом, но не дают удобного агрегата по всей рабочей нагрузке или не раскрывают физическое состояние таблицы.</div>
+</div>
+<div class="card">
+<h3>Практический блок</h3>
+<div class="tabs" data-tabs="l4">
+<button class="tab-btn active" data-tab="l4-1">Включение</button>
+<button class="tab-btn" data-tab="l4-2">Top SQL</button>
+<button class="tab-btn" data-tab="l4-3">Bloat</button>
+</div>
+<div class="tab-panel active" id="l4-1">
+<div class="screen"><div class="screen-body">shared_preload_libraries = 'pg_stat_statements,auto_explain'
+compute_query_id = on
+
+CREATE EXTENSION pg_stat_statements;
+CREATE EXTENSION pgstattuple;
+CREATE EXTENSION pg_visibility;
+
+После изменения shared_preload_libraries нужен рестарт.</div></div>
+</div>
+<div class="tab-panel" id="l4-2">
+<div class="screen"><div class="screen-body">SELECT query, calls, total_plan_time, total_exec_time,
+       mean_exec_time, rows, shared_blks_hit, shared_blks_read
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 10;
+
+Ищите не только самый медленный запрос, но и запросы с большим суммарным ущербом.</div></div>
+</div>
+<div class="tab-panel" id="l4-3">
+<div class="screen"><div class="screen-body">SELECT * FROM pgstattuple('public.orders');
+
+SELECT * FROM pg_visibility_map_summary('public.orders');
+
+Интерпретация:
+• высокий dead_tuple_percent → autovacuum не успевает
+• сильный bloat → возможны лишние чтения и плохое использование диска</div></div>
+</div>
+<div class="callout">Глубокая оптимизация почти всегда начинается с <code>pg_stat_statements</code>: он показывает не «самый громкий» SQL, а действительно самый дорогой для всей системы.</div>
+</div>
+</div>
+<div class="card" style="margin-top:18px;">
+<h3>Самопроверка</h3>
+<div class="quiz" data-quiz="level4">
+<div class="question" data-correct="1">
+<p>1. Какое расширение лучше подходит для поиска тяжелых SQL по суммарному времени?</p>
+<div class="answers">
+<div class="answer">pg_stat_statements</div>
+<div class="answer">pg_stat_activity</div>
+<div class="answer">pg_stat_activity_count</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="2">
+<p>2. Что даёт auto_explain?</p>
+<div class="answers">
+<div class="answer">Создает индексы автоматически</div>
+<div class="answer">Логирует планы медленных запросов</div>
+<div class="answer">Оптимизирует VACUUM FULL</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="3">
+<p>3. Для чего нужен pgstattuple?</p>
+<div class="answers">
+<div class="answer">Для управления ролями</div>
+<div class="answer">Для чтения сетевых сокетов</div>
+<div class="answer">Для оценки bloat</div>
+</div>
+<div class="feedback"></div>
+</div>
+</div>
+
+<div class="text-quiz">
+<h4>Открытый вопрос</h4>
+<div class="text-question" data-answers="pg_visibility" data-key="level4-open" data-success="Да. Именно pg_visibility позволяет посмотреть состояние visibility map и страниц таблицы, то есть увидеть, какие страницы помечены как all_visible, а какие как all_frozen. Это важно в контексте проблемы переполнения счетчика transaction ID: PostgreSQL использует 32-битные XID, и если очень старые версии строк вовремя не “заморозить”, после переполнения старые транзакции могут начать интерпретироваться некорректно.">
+<p>4. Какое расширение позволяет отслеживать, какие страницы таблицы помечены как видимые и как замороженные, чтобы контролировать старые страницы и риски переполнения переменной transaction ID?</p>
+<div class="answer-row">
+<input class="text-input" placeholder="Введите название расширения" type="text"/>
+<button class="secondary check-text-btn" type="button">Проверить</button>
+</div>
+<div class="hint">Нужно отвечать коротко.</div>
+<div class="feedback"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="level glass" id="level5">
+<div class="section-head">
+<div>
+<span class="eyebrow">Уровень 5</span>
+<h2>Внутренняя телеметрия: WAL, checkpoints, autovacuum, wait events, репликация</h2>
+<p class="section-copy">Это самый внутренний и самый мощный слой диагностики. Здесь мы видим, что происходит с записью WAL, работой checkpointer и bgwriter, жизненным циклом мертвых кортежей, ожиданиями backend-процессов и отставанием реплик.</p>
+</div>
+<div class="tag-row">
+<span class="tag">pg_stat_wal</span>
+<span class="tag">pg_stat_checkpointer</span>
+<span class="tag">pg_stat_bgwriter</span>
+<span class="tag">autovacuum</span>
+<span class="tag">replication lag</span>
+</div>
+</div>
+<div class="grid-3">
+<div class="card">
+<h3>Теоретический блок</h3>
+<div class="list">
+<div><strong>WAL</strong> фиксирует изменения до записи в data files и помогает анализировать интенсивность записи и нагрузку на durability.</div>
+<div><strong>pg_stat_checkpointer</strong> показывает число scheduled/requested checkpoints и затраты времени на запись и синхронизацию.</div>
+<div><strong>pg_stat_bgwriter</strong> описывает поведение background writer и буферов.</div>
+<div><strong>Autovacuum</strong> нужен для очистки dead tuples, обновления visibility map и предотвращения transaction ID wraparound.</div>
+<div><strong>Replication</strong> требует контроля lag, активности sender/receiver и понимания, где именно возникает отставание: send/write/flush/replay.</div>
+<div><strong>Wait events</strong> показывают, что блокирует прогресс backend: lock, IO, LWLock, client, IPC и другие категории.</div>
+</div>
+<div class="stats-grid">
+<div class="stat-box">wal_bytes / wal_records</div>
+<div class="stat-box">num_timed / num_requested</div>
+<div class="stat-box">buffers_clean / buffers_alloc</div>
+<div class="stat-box">vacuum progress / replay lag</div>
+</div>
+</div>
+<div class="card">
+<h3>Визуальный блок</h3>
+<div class="image-frame">
+<svg height="100%" viewbox="0 0 520 260" width="100%" xmlns="http://www.w3.org/2000/svg">
+<rect fill="#09131f" height="260" width="520"></rect>
+<text fill="#dce8ff" font-size="16" x="22" y="28">Внутренний цикл записи и обслуживания</text>
+<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="112" x="24" y="48"></rect>
+<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="92" x="164" y="48"></rect>
+<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="104" x="284" y="48"></rect>
+<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="84" x="412" y="48"></rect>
+<text fill="#dce8ff" text-anchor="middle" x="80" y="76">backend</text>
+<text fill="#dce8ff" text-anchor="middle" x="210" y="76">WAL</text>
+<text fill="#dce8ff" text-anchor="middle" x="336" y="76">checkpointer</text>
+<text fill="#dce8ff" text-anchor="middle" x="454" y="76">disk</text>
+<path d="M136 71 H164" stroke="#7aa7ff" stroke-width="3"></path>
+<path d="M256 71 H284" stroke="#4fe2bf" stroke-width="3"></path>
+<path d="M388 71 H412" stroke="#ffc965" stroke-width="3"></path>
+<rect fill="#11233b" height="52" rx="18" ry="18" stroke="#42618c" width="140" x="72" y="150"></rect>
+<rect fill="#11233b" height="52" rx="18" ry="18" stroke="#42618c" width="140" x="308" y="150"></rect>
+<text fill="#dce8ff" text-anchor="middle" x="142" y="182">autovacuum</text>
+<text fill="#dce8ff" text-anchor="middle" x="378" y="182">standby / replay</text>
+<path d="M210 94 V150" stroke="#4fe2bf" stroke-width="3"></path>
+<path d="M336 94 V150" stroke="#7aa7ff" stroke-width="3"></path>
+<text fill="#8fa9d6" font-size="13" text-anchor="middle" x="260" y="234">Здесь живут корневые причины burst write, bloat, wraparound-risk и replication lag</text>
+</svg>
+</div>
+<div class="screen" style="margin-top:12px;">
+<div class="screen-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+<div class="screen-body">SELECT num_timed, num_requested, num_done,
+       restartpoints_timed, restartpoints_req,
+       checkpoint_write_time, checkpoint_sync_time
+FROM pg_stat_checkpointer;
+
+SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full
+FROM pg_stat_wal;</div>
+</div>
+<div class="image-caption">Низкоуровневые статистики особенно полезны, когда деградация периодическая: её часто вызывают не отдельные запросы, а циклические фоновые механизмы или нагрузка на WAL и storage.</div>
+</div>
+<div class="card">
+<h3>Практический блок</h3>
+<div class="tabs" data-tabs="l5">
+<button class="tab-btn active" data-tab="l5-1">Checkpoints и WAL</button>
+<button class="tab-btn" data-tab="l5-2">Autovacuum</button>
+<button class="tab-btn" data-tab="l5-3">Репликация</button>
+</div>
+<div class="tab-panel active" id="l5-1">
+<div class="screen"><div class="screen-body">SELECT num_timed, num_requested, checkpoint_write_time, checkpoint_sync_time
+FROM pg_stat_checkpointer;
+
+SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full
+FROM pg_stat_wal;
+
+Если num_requested растёт часто, а диск перегружен, проверьте max_wal_size,
+checkpoint_timeout и профиль bulk writes.</div></div>
+</div>
+<div class="tab-panel" id="l5-2">
+<div class="screen"><div class="screen-body">SELECT pid, relid::regclass, phase,
+       heap_blks_total, heap_blks_scanned, heap_blks_vacuumed,
+       index_vacuum_count, num_dead_tuples
+FROM pg_stat_progress_vacuum;
+
+SELECT relname, n_live_tup, n_dead_tup, vacuum_count, autovacuum_count
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC
+LIMIT 10;</div></div>
+</div>
+<div class="tab-panel" id="l5-3">
+<div class="screen"><div class="screen-body">SELECT application_name, state, sync_state,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), sent_lsn)  AS send_lag_bytes,
+       pg_wal_lsn_diff(sent_lsn, write_lsn)             AS write_lag_bytes,
+       pg_wal_lsn_diff(write_lsn, flush_lsn)            AS flush_lag_bytes,
+       pg_wal_lsn_diff(flush_lsn, replay_lsn)           AS replay_lag_bytes
+FROM pg_stat_replication;
+
+Смотрите, где именно копится отставание.</div></div>
+</div>
+<div class="callout">Autovacuum — критический механизм жизненного цикла таблиц. Если он не успевает, растут dead tuples, bloat, время чтения и риск wraparound. Если отстаёт репликация, нельзя смотреть только на общий lag — нужно разложить его по стадиям send/write/flush/replay.</div>
+</div>
+</div>
+<div class="card" style="margin-top:18px;">
+<h3>Самопроверка</h3>
+<div class="quiz" data-quiz="level5">
+<div class="question" data-correct="2">
+<p>1. Что может вызывать периодические всплески latency даже без одного «плохого» запроса?</p>
+<div class="answers">
+<div class="answer">Использование индексов при фильтрации в селекте</div>
+<div class="answer">Частые checkpoints и нагрузка на WAL</div>
+<div class="answer">Наличие расширения pg_stat_statements</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="1">
+<p>2. Зачем нужны wait events?</p>
+<div class="answers">
+<div class="answer">Чтобы понять, на чем ждет backend</div>
+<div class="answer">Чтобы автоматически чинить блокировки ожидания</div>
+<div class="answer">Чтобы автоматизировать VACUUM</div>
+</div>
+<div class="feedback"></div>
+</div>
+<div class="question" data-correct="2">
+<p>3. Что даёт декомпозиция replication lag на send/write/flush/replay?</p>
+<div class="answers">
+<div class="answer">Понимание, что тормозит репликацию</div>
+<div class="answer">Понимание, на какой стадии тормозит репликация</div>
+<div class="answer">Возможность оптимизировать работу WAL</div>
+</div>
+<div class="feedback"></div>
+</div>
+</div>
+
+<div class="text-quiz">
+<h4>Открытый вопрос</h4>
+<div class="text-question" data-answers="auto vacuum|auto-vacuum|autovacuum|vacuum" data-key="level5-open" data-success="Верно. За регулярную очистку dead tuples и поддержку видимости страниц отвечает autovacuum.">
+<p>4. Какой механизм PostgreSQL очищает dead tuples и не даёт таблицам бесконтрольно раздуваться?</p>
+<div class="answer-row">
+<input class="text-input" placeholder="Введите название механизма" type="text"/>
+<button class="secondary check-text-btn" type="button">Проверить</button>
+</div>
+<div class="hint">Нужно отвечать коротко.</div>
+<div class="feedback"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="level glass" id="cases">
+<div class="section-head">
+<div>
+<span class="eyebrow">Кейсы</span>
+<h2>Диагностические сценарии: как связывать уровни между собой</h2>
+<p class="section-copy">Этот блок нужен для «самостоятельной работы сверх базы», потому что показывает не просто список инструментов, а типовой маршрут расследования инцидента: от симптома до подтверждённой первопричины.</p>
+</div>
+<div class="tag-row">
+<span class="tag">latency spike</span>
+<span class="tag">locks</span>
+<span class="tag">autovacuum lag</span>
+<span class="tag">replication lag</span>
+</div>
+</div>
+<div class="grid-2">
+<div class="card">
+<h3>Кейс 1. Резкий рост latency</h3>
+<div class="timeline">
+<div class="timeline-item"><div class="timeline-badge">1</div><div class="list"><div><strong>Уровень 2:</strong> на Grafana растёт response time и disk await.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">2</div><div class="list"><div><strong>Уровень 1:</strong> <code>iostat -xz 1</code> показывает высокий await и %util.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">3</div><div class="list"><div><strong>Уровень 5:</strong> <code>pg_stat_checkpointer</code> показывает рост requested checkpoints и long write/sync time.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">4</div><div class="list"><div><strong>Вывод:</strong> причина не в одном SQL, а в burst write из-за checkpoint pressure.</div></div></div>
+</div>
+</div>
+<div class="card">
+<h3>Кейс 2. Таблица «распухла» и запросы деградируют</h3>
+<div class="timeline">
+<div class="timeline-item"><div class="timeline-badge">1</div><div class="list"><div><strong>Уровень 3:</strong> растут <code>n_dead_tup</code> и время чтения.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">2</div><div class="list"><div><strong>Уровень 5:</strong> прогресс autovacuum редкий или отстающий.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">3</div><div class="list"><div><strong>Уровень 4:</strong> <code>pgstattuple()</code> подтверждает bloat и долю dead tuples.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">4</div><div class="list"><div><strong>Вывод:</strong> нужно улучшать autovacuum policy, а иногда и пересобирать объекты.</div></div></div>
+</div>
+</div>
+</div>
+<div class="grid-2" style="margin-top:18px;">
+<div class="card">
+<h3>Кейс 3. Подвисшие запросы приложения</h3>
+<div class="timeline">
+<div class="timeline-item"><div class="timeline-badge">1</div><div class="list"><div><strong>Уровень 3:</strong> <code>pg_stat_activity</code> показывает <code>wait_event_type = Lock</code>.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">2</div><div class="list"><div><strong>Уровень 3:</strong> находим blocker по <code>pg_blocking_pids()</code>.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">3</div><div class="list"><div><strong>Уровень 4:</strong> по <code>pg_stat_statements</code> ищем SQL, который чаще всего приводит к блокировкам.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">4</div><div class="list"><div><strong>Вывод:</strong> проблема в конкурентном паттерне транзакций, а не в CPU.</div></div></div>
+</div>
+</div>
+<div class="card">
+<h3>Кейс 4. Реплика отстаёт</h3>
+<div class="timeline">
+<div class="timeline-item"><div class="timeline-badge">1</div><div class="list"><div><strong>Уровень 2:</strong> алерт по replication lag.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">2</div><div class="list"><div><strong>Уровень 5:</strong> делим lag на send/write/flush/replay.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">3</div><div class="list"><div><strong>Уровень 1:</strong> проверяем сеть или диск standby, если проблема не в отправке.</div></div></div>
+<div class="timeline-item"><div class="timeline-badge">4</div><div class="list"><div><strong>Вывод:</strong> отставание может быть вызвано как сетью, так и применением WAL на стороне standby.</div></div></div>
+</div>
+</div>
+</div>
+
+<div class="card case-lab-card" style="margin-top:18px;">
+<h3>Интерактивные задания по кейсам</h3>
+<p class="section-copy" style="margin-bottom:14px;">Ниже — задания, где нужно по симптомам догадаться, что проверять дальше. Выберите один вариант ответа, затем посмотрите короткое пояснение.</p>
+<div class="case-lab">
+<div class="case-task" data-correct="2" data-key="case1-step1" data-success="Верно. Если iowait и await нормальные, диск не выглядит главным bottleneck на этом шаге.">
+<p><strong>Кейс A, шаг 1.</strong> На Grafana выросла latency. Вы проверили <code>iostat</code>: iowait низкий, await низкий. Значит, диск — проблема?</p>
+<div class="answers">
+<div class="answer">Да, по этим симптомам диск — проблема</div>
+<div class="answer">Нет, по этим симптомам диск не выглядит узким местом</div>
+<div class="answer">Нужно делать VACUUM ANALYZE</div>
+</div>
+<div class="feedback"></div>
+</div>
+
+<div class="case-task" data-correct="2" data-key="case1-step2" data-success="Верно. Заметная доля dead tuples наводит на мысль о bloat и о том, что autovacuum может не успевать.">
+<p><strong>Кейс A, шаг 2.</strong> Вы посмотрели таблицу <code>orders</code>: dead tuples составляют примерно 10% её объёма. На какую гипотезу это наводит в первую очередь?</p>
+<div class="answers">
+<div class="answer">Проблема в сети</div>
+<div class="answer">Проблема в bloat</div>
+<div class="answer">Проблема в индексах</div>
+</div>
+<div class="feedback"></div>
+</div>
+
+<div class="case-task" data-correct="2" data-key="case1-step3" data-success="Да. После такой находки логичнее проверять autovacuum, bloat-метрики и подтверждать гипотезу через pgstattuple или прогресс vacuum.">
+<p><strong>Кейс A, шаг 3.</strong> Какой следующий шаг диагностики логичнее всего после такой находки?</p>
+<div class="answers">
+<div class="answer">Проверить I/O</div>
+<div class="answer">Проверить autovacuum</div>
+<div class="answer">Апгрейдить железо</div>
+</div>
+<div class="feedback"></div>
+</div>
+
+<div class="case-task" data-correct="2" data-key="case2-step1" data-success="Верно. Если send/write/flush почти не отстают, а replay lag высокий, проблема вероятнее на стороне standby во время применения WAL.">
+<p><strong>Кейс B, шаг 1.</strong> Реплика отстаёт. Send lag, write lag и flush lag почти нулевые, а replay lag высокий. Где вероятнее всего проблема?</p>
+<div class="answers">
+<div class="answer">При отправке WAL</div>
+<div class="answer">На стороне standby</div>
+<div class="answer">В клиентском пуле коннектов</div>
+</div>
+<div class="feedback"></div>
+</div>
+
+<div class="case-task" data-correct="2" data-key="case2-step2" data-success="Да. Для такой ситуации логично проверить локальный диск и I/O-поведение на standby: await, util, replay speed и нагрузку на storage.">
+<p><strong>Кейс B, шаг 2.</strong> Что стоит проверить в первую очередь после предыдущего шага?</p>
+<div class="answers">
+<div class="answer">Троттлинг CPU</div>
+<div class="answer">Диск и I/O</div>
+<div class="answer">Сеть</div>
+</div>
+<div class="feedback"></div>
+</div>
+
+<div class="case-task" data-correct="2" data-key="case3-step1" data-success="Верно. При wait_event_type = Lock приоритетнее искать blocker и конкурирующие транзакции, а не уходить сразу в CPU-профилирование.">
+<p><strong>Кейс C.</strong> В <code>pg_stat_activity</code> активные запросы висят с <code>wait_event_type = Lock</code>. Какое направление расследования приоритетнее?</p>
+<div class="answers">
+<div class="answer">CPU-профилирование процессов</div>
+<div class="answer">Разбор конкурирующих транзакций</div>
+<div class="answer">VACUUM ANALYZE</div>
+</div>
+<div class="feedback"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="footer glass">
+<h2 style="margin:0;">Источники</h2>
+<div class="footer-grid">
+<div class="card">
+<h3>Рекомендуемые официальные источники</h3>
+<div class="source-list">
+<a href="https://www.postgresql.org/docs/current/monitoring.html" rel="noreferrer" target="_blank">Monitoring Database Activity</a>
+<a href="https://www.postgresql.org/docs/current/monitoring-stats.html" rel="noreferrer" target="_blank">Cumulative Statistics System</a>
+<a href="https://www.postgresql.org/docs/current/pgstatstatements.html" rel="noreferrer" target="_blank">pg_stat_statements</a>
+<a href="https://www.postgresql.org/docs/current/auto-explain.html" rel="noreferrer" target="_blank">auto_explain</a>
+<a href="https://www.postgresql.org/docs/current/pgstattuple.html" rel="noreferrer" target="_blank">pgstattuple</a>
+<a href="https://www.postgresql.org/docs/current/wal-intro.html" rel="noreferrer" target="_blank">Write-Ahead Logging (WAL)</a>
+</div>
+</div>
+</div>
+<div class="side-note">Этот HTML-файл подготовлен для дисциплины «Оптимизация БД» с помощью ChatGPT 5.4.</div>
+</section>
+</main>
+</div>
+<script>
+    const STORAGE_KEY = 'pg-observatory-progress-v2';
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    const explanations = {
+      level1: [
+        'Верно: сочетание высокого iowait и роста await в iostat характерно для дискового узкого места.',
+        'Верно: часть проблем рождается на уровне ОС и железа, поэтому одной SQL-диагностики недостаточно.',
+        'Верно: активный swap под нагрузкой обычно означает нехватку RAM и риск роста latency.'
+      ],
+      level2: [
+        'Верно: exporter делает метрики PostgreSQL доступными внешней системе мониторинга.',
+        'Верно: совмещённые графики помогают увидеть, что первично — ресурсный сбой или поведение СУБД.',
+        'Верно: Alertmanager отвечает за маршрутизацию и доставку уведомлений.'
+      ],
+      level3: [
+        'Верно: pg_stat_activity — основной источник сведений о текущих сессиях и ожиданиях.',
+        'Верно: EXPLAIN (ANALYZE, BUFFERS) раскрывает фактический путь выполнения запроса.',
+        'Верно: blks_hit и blks_read помогают оценивать работу буферного кэша.'
+      ],
+      level4: [
+        'Верно: pg_stat_statements показывает суммарный вклад SQL в нагрузку.',
+        'Верно: auto_explain автоматически логирует планы медленных запросов.',
+        'Верно: pgstattuple нужен для оценки bloat и dead tuples.'
+      ],
+      level5: [
+        'Верно: burst write и latency часто вызывает checkpoint pressure и WAL-нагрузка.',
+        'Верно: wait events показывают, на чём именно ждёт backend.',
+        'Верно: декомпозиция lag нужна, чтобы найти конкретную стадию торможения репликации.'
+      ]
+    };
+
+    function loadProgress() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    }
+
+    function saveProgress(data) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function updateProgress() {
+      const progress = loadProgress();
+      const total = document.querySelectorAll('.question, .text-question, .case-task').length;
+      const done = Object.keys(progress).length;
+      const percent = Math.round((done / total) * 100);
+      progressBar.style.width = percent + '%';
+      progressText.textContent = percent + '%';
+    }
+
+
+    function normalizeAnswer(text) {
+      return (text || '')
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/[.,;:!?()\[\]{}\"'`]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function markProgress(key) {
+      const progress = loadProgress();
+      progress[key] = true;
+      saveProgress(progress);
+      updateProgress();
+    }
+
+    function attachTextChecks() {
+      document.querySelectorAll('.text-question').forEach((block) => {
+        const button = block.querySelector('.check-text-btn');
+        const input = block.querySelector('.text-input');
+        const feedback = block.querySelector('.feedback');
+        if (!button || !input || !feedback) return;
+
+        const runCheck = () => {
+          const value = normalizeAnswer(input.value);
+          const answers = (block.dataset.answers || '')
+            .split('|')
+            .map(normalizeAnswer)
+            .filter(Boolean);
+
+          const ok = value && answers.some(answer => value.includes(answer));
+
+          block.classList.remove('correct', 'wrong');
+
+          if (ok) {
+            block.classList.add('correct');
+            feedback.textContent = block.dataset.success || 'Верно.';
+            markProgress(block.dataset.key);
+          } else {
+            block.classList.add('wrong');
+            feedback.textContent = 'Пока не совсем то. Подумайте, какой уровень мониторинга здесь логичнее проверить следующим.';
+          }
+        };
+
+        button.addEventListener('click', runCheck);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            runCheck();
+          }
+        });
+      });
+    }
+
+function attachCaseChecks() {
+  document.querySelectorAll('.case-task').forEach((task) => {
+    const correctIndex = Number(task.dataset.correct) - 1;
+    const feedback = task.querySelector('.feedback');
+    const answers = task.querySelectorAll('.answer');
+
+    answers.forEach((answer, answerIndex) => {
+      answer.addEventListener('click', () => {
+        answers.forEach(a => a.classList.remove('correct', 'wrong'));
+        task.classList.remove('correct', 'wrong');
+
+        if (answerIndex === correctIndex) {
+          answer.classList.add('correct');
+          task.classList.add('correct');
+          feedback.textContent = task.dataset.success || 'Верно.';
+          markProgress(task.dataset.key);
+        } else {
+          answer.classList.add('wrong');
+          task.classList.add('wrong');
+          feedback.textContent = 'Неверно. Подумайте, какой следующий шаг лучше согласуется с симптомами в кейсе.';
+        }
+      });
+    });
+  });
+}
+
+document.querySelectorAll('.quiz').forEach((quiz) => {
+      const quizName = quiz.dataset.quiz;
+      quiz.querySelectorAll('.question').forEach((question, index) => {
+        const correctIndex = Number(question.dataset.correct) - 1;
+        const key = `${quizName}-${index}`;
+        const feedback = question.querySelector('.feedback');
+        question.querySelectorAll('.answer').forEach((answer, answerIndex) => {
+          answer.addEventListener('click', () => {
+            question.querySelectorAll('.answer').forEach(a => a.classList.remove('correct', 'wrong'));
+            if (answerIndex === correctIndex) {
+              answer.classList.add('correct');
+              feedback.textContent = explanations[quizName][index];
+              markProgress(key);
+            } else {
+              answer.classList.add('wrong');
+              feedback.textContent = 'Неверно. Сверьтесь с блоками теории и практики выше, затем попробуйте ещё раз.';
+            }
+          });
+        });
+      });
+    });
+
+    document.querySelectorAll('[data-tabs]').forEach((group) => {
+      const host = group.closest('.card');
+      group.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          host.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          host.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          host.querySelector('#' + btn.dataset.tab).classList.add('active');
+        });
+      });
+    });
+
+    const sectionsForNav = [...document.querySelectorAll('section.level')];
+
+    function updateActiveNav() {
+      const marker = window.scrollY + 180;
+      let current = sectionsForNav[0];
+
+      sectionsForNav.forEach((section) => {
+        if (section.offsetTop <= marker) current = section;
+      });
+
+      document.querySelectorAll('.nav-link').forEach((link) => {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + current.id);
+      });
+    }
+
+    window.addEventListener('scroll', updateActiveNav, { passive: true });
+    window.addEventListener('resize', updateActiveNav);
+
+    document.getElementById('startLearning').addEventListener('click', () => {
+      document.getElementById('level1').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    document.getElementById('openCases').addEventListener('click', () => {
+      document.getElementById('cases').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    document.getElementById('resetProgress').addEventListener('click', () => {
+      localStorage.removeItem(STORAGE_KEY);
+      document.querySelectorAll('.answer').forEach(a => a.classList.remove('correct', 'wrong'));
+      document.querySelectorAll('.text-question, .case-task').forEach(block => block.classList.remove('correct', 'wrong'));
+      document.querySelectorAll('.text-input').forEach(input => input.value = '');
+      document.querySelectorAll('.feedback').forEach(f => f.textContent = '');
+      updateProgress();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.matches('input, textarea')) return;
+      if (e.key.toLowerCase() === 'r') document.getElementById('resetProgress').click();
+      if (e.key.toLowerCase() === 't') window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (e.key.toLowerCase() === 'n') {
+        const sections = [...document.querySelectorAll('section.level')];
+        const y = window.scrollY + 120;
+        const next = sections.find(s => s.offsetTop > y);
+        (next || sections[0]).scrollIntoView({ behavior: 'smooth' });
+      }
+    });
+
+    attachTextChecks();
+    attachCaseChecks();
+    updateProgress();
+    updateActiveNav();
+  </script>
+</body>
+</html>
