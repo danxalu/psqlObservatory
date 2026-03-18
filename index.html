@@ -644,6 +644,7 @@
 <div class="metric-tile"><b>5</b><span>уровней айсберга</span></div>
 <div class="metric-tile"><b>15</b><span>контрольных вопросов</span></div>
 <div class="metric-tile"><b>30+</b><span>SQL и shell-примеров</span></div>
+<div class="metric-tile"><b>3</b><span>диагностических кейса</span></div>
 </div>
 </div>
 <div class="hero-side glass">
@@ -707,10 +708,16 @@ WAL → checkpoints → replication | autovacuum, wait events</div>
 <div class="card">
 <h3>Теоретический блок</h3>
 <div class="list">
-<div><strong>Категория инструментов:</strong> системные утилиты Linux/Unix и сборщики статистики, работающие вне PostgreSQL.</div>
-<div><strong>Ключевая идея:</strong> не пытаться объяснить любую деградацию через SQL, пока не проверены ресурсы узла.</div>
-<div><strong>Конкретные средства:</strong> <code>top</code>/<code>htop</code> для процессов, <code>vmstat</code> для памяти и scheduler, <code>iostat -xz</code> для диска, <code>pidstat</code> для профиля postgres-процессов, <code>ss</code> и <code>sar -n</code> для сети.</div>
-<div><strong>Что важно интерпретировать:</strong> <code>iowait</code> показывает долю времени CPU в ожидании I/O, а <code>await</code> в <code>iostat</code> помогает понять задержку дисковых операций. Если оба показателя нормальные, диск не выглядит главным узким местом.</div>
+<div><strong>Категория инструментов:</strong> системные утилиты ОС и средства хостового мониторинга, которые показывают состояние CPU, памяти, диска, сети и процессов вне самой СУБД. Это внешний слой диагностики: он нужен, чтобы понять, не упирается ли база в ограничения узла ещё до разбора SQL.</div>
+<div><strong>Зачем этот уровень нужен первым:</strong> PostgreSQL очень часто выглядит «медленным» из-за причин, которые лежат ниже уровня запросов: очередь на CPU, нехватка RAM, активный swap, перегруженный диск, сетевые retransmit'ы или соседняя нагрузка на том же сервере. Если сначала не проверить хост, легко начать «лечить» индексы и планы, хотя корень проблемы находится в инфраструктуре.</div>
+<div><strong><code>load average</code>:</strong> это не процент CPU, а среднее число задач, которые либо выполняются, либо ждут процессор/непрерываемое I/O. Само по себе высокое значение не доказывает проблему, но в связке с CPU saturation, iowait и очередями на диск помогает понять, сервер перегружен вычислениями или простаивает в ожидании ресурса.</div>
+<div><strong><code>top</code> и <code>htop</code>:</strong> дают быструю картину по процессам: кто съедает CPU, сколько памяти занято, есть ли рост system time, насколько активны postgres-backend'ы и фоновые процессы. <code>htop</code> удобнее для интерактивного просмотра по ядрам и сортировки, а <code>top</code> часто проще использовать на минимальных серверах и в ssh-сеансе.</div>
+<div><strong><code>vmstat</code>:</strong> помогает увидеть баланс между runnable-процессами, free/cache/buffers, swap-in/swap-out, прерываниями и распределением CPU по <code>us</code>, <code>sy</code>, <code>id</code>, <code>wa</code>. Для расследования деградации PostgreSQL особенно полезно наблюдать, растут ли очереди процессов и начинается ли свопинг под нагрузкой.</div>
+<div><strong><code>iostat -xz</code>:</strong> нужен для оценки задержек и занятости диска. <code>await</code> показывает полное время операции, <code>%util</code> — насколько устройство занято, а throughput помогает понять, идёт ли речь о больших последовательных потоках или о болезненном random I/O. Для БД это критично, потому что checkpoints, autovacuum, bulk load и cache miss могут упираться именно в диск.</div>
+<div><strong><code>pidstat</code>, <code>ps</code> и потоковый разрез процессов:</strong> позволяют перейти от «серверу плохо» к вопросу «какие именно postgres-процессы создают нагрузку». Через них удобно отличать client backend, walwriter, checkpointer, autovacuum worker, background writer и понимать, кто нагружает CPU или диск в конкретный момент.</div>
+<div><strong>Как читать <code>load average</code> на практике:</strong> его всегда нужно сопоставлять с числом CPU и текущим состоянием хоста. Большой <code>load</code> при высоком <code>us</code>/<code>sy</code> обычно означает борьбу за процессор; большой <code>load</code> при заметном <code>wa</code> часто указывает, что значительная часть задач ждёт I/O. Поэтому <code>load average</code> — это индикатор очереди, а не самостоятельный диагноз.</div>
+<div><strong>Память и swap:</strong> маленький объём <code>free</code> ещё не страшен сам по себе, потому что Linux охотно использует память под page cache. Гораздо важнее смотреть, начался ли swap under load, есть ли давление на память, падает ли эффективность кеша и не вытесняются ли рабочие страницы PostgreSQL. Активный swap почти всегда повышает latency и делает поведение системы рваным.</div>
+<div><strong>Практическая эвристика:</strong> если одновременно растут <code>iowait</code> в CPU-метриках и <code>await</code> в <code>iostat</code>, первым подозреваемым становится диск. Если <code>load average</code> высокий, но <code>wa</code> низкий и один или несколько postgres-процессов забирают ядра в <code>us</code>, вероятнее CPU-bound нагрузка. Если же CPU не забит, а latency скачет вместе со swap и reclaim, проблема может быть в памяти.</div>
 </div>
 <div class="stats-grid">
 <div class="stat-box">CPU user/system/iowait</div>
@@ -733,19 +740,8 @@ PID USER     S  %CPU %MEM COMMAND
 2134 postgres S  89.2 13.1 postgres
 2135 postgres S  74.0 12.7 postgres</div>
 </div>
-<div class="image-frame">
-<svg height="100%" viewbox="0 0 520 220" width="100%" xmlns="http://www.w3.org/2000/svg">
-<rect fill="#09131f" height="220" width="520"></rect>
-<text fill="#dce8ff" font-size="16" x="24" y="28">Пример дашборда хоста</text>
-<line stroke="#29425e" x1="34" x2="480" y1="170" y2="170"></line>
-<line stroke="#29425e" x1="34" x2="34" y1="60" y2="170"></line>
-<polyline fill="none" points="40,150 90,120 140,130 190,80 240,70 290,65 340,95 390,88 440,40" stroke="#7aa7ff" stroke-width="4"></polyline>
-<polyline fill="none" points="40,165 90,160 140,154 190,152 240,140 290,120 340,108 390,84 440,72" stroke="#4fe2bf" stroke-width="4"></polyline>
-<text fill="#7aa7ff" font-size="14" x="352" y="32">Disk await</text>
-<text fill="#4fe2bf" font-size="14" x="352" y="52">Swap used</text>
-</svg>
-</div>
-<div class="image-caption">Здесь видно типичный паттерн: рост swap и disk await совпадает с жалобами на медленные запросы. Это сигнал сначала проверить ресурсную базу, а не менять индексы вслепую.</div>
+<div class="image-frame"><img alt="Скриншот top в Linux" src="https://upload.wikimedia.org/wikipedia/commons/6/63/Linux_top.png" style="width:100%; height:100%; object-fit:cover; display:block; border-radius:18px;"/></div>
+<div class="image-caption">Реальный скриншот top: по нему удобно объяснять load average, user/system/iowait и память хоста. Источник: <a href="https://commons.wikimedia.org/wiki/File:Linux_top.png" rel="noreferrer" target="_blank">Wikimedia Commons</a>.</div>
 </div>
 </div>
 <div class="card">
@@ -819,7 +815,6 @@ sar -n DEV 1
 <div class="feedback"></div>
 </div>
 </div>
-
 <div class="text-quiz">
 <h4>Открытый вопрос</h4>
 <div class="text-question" data-answers="iowait|await" data-key="level1-open" data-success="Да. В первую очередь смотрят iowait и/или await: они быстро подсказывают, упирается ли система в диск.">
@@ -853,10 +848,15 @@ sar -n DEV 1
 <div class="card">
 <h3>Теоретический блок</h3>
 <div class="list">
-<div><strong>Prometheus</strong> забирает метрики по HTTP с exporters, хранит их и позволяет строить запросы на PromQL.</div>
-<div><strong>Grafana</strong> визуализирует метрики как дашборды и корреляции по времени.</div>
-<div><strong>Alertmanager</strong> доставляет уведомления в мессенджеры и почту, подавляет дубликаты и группирует алерты.</div>
-<div><strong>Postgres_exporter</strong> публикует метрики PostgreSQL: соединения, транзакции, репликацию, cache hit, background writer, WAL и другое.</div>
+<div><strong>Категория инструментов:</strong> внешняя система мониторинга, где PostgreSQL и хост экспортируют метрики наружу, а затем они собираются, хранятся, визуализируются и используются для алертинга. Это слой не разовой ручной диагностики, а постоянного наблюдения во времени.</div>
+<div><strong>Базовая цепочка наблюдаемости:</strong> exporter публикует метрики, Prometheus их периодически считывает по HTTP, сохраняет как временные ряды и даёт язык запросов PromQL, Grafana строит дашборды и совмещает на одном экране разные сигналы, а Alertmanager маршрутизирует уведомления по правилам.</div>
+<div><strong>Зачем это нужно, если есть shell и SQL:</strong> разовый снимок полезен только для текущего момента, а большая часть проблем в продакшене имеет историю: деградация начинается за час до инцидента, совпадает с релизом, checkpoint spike происходит каждые N минут, lag реплики растёт ночью. Внешняя система мониторинга нужна именно для сравнения во времени и корреляции событий.</div>
+<div><strong>Prometheus:</strong> это хранилище и движок запросов для метрик. Он регулярно делает scrape целей, хранит значения в виде time series и позволяет отвечать не только на вопрос «что сейчас», но и «когда началось», «насколько выросло», «что происходило рядом». Для PostgreSQL это особенно полезно при сравнении нагрузки БД с метриками ОС, контейнера и приложения.</div>
+<div><strong>Exporters:</strong> <code>postgres_exporter</code> вытаскивает наружу статистики PostgreSQL, а <code>node_exporter</code> — показатели хоста. Без exporter'ов Prometheus не «понимает» саму СУБД; он видит только то, что ему отдали в формате метрик. Поэтому корректность набора collectors во многом определяет, что именно вы сможете увидеть в Grafana.</div>
+<div><strong>Grafana:</strong> нужна не просто для красивых графиков, а для сопоставления причинно-следственной цепочки. На одном дашборде можно увидеть рост CPU, одновременное падение cache hit ratio, всплеск checkpoint write time, рост lock waits и изменение latency приложения. Хороший дашборд не заменяет анализ, но резко сокращает время на локализацию проблемы.</div>
+<div><strong>Alerting:</strong> алерты полезны там, где есть повторяемые пороги и операционный риск: недоступность target'а, переполнение соединений, длительный replication lag, рост disk usage, аномальный checkpoint time, регулярный failure scrape'а. Однако алерт должен быть привязан к реально значимому симптому; слишком шумные правила быстро приучают команду их игнорировать.</div>
+<div><strong>Что обычно выводят на PostgreSQL-дашборды:</strong> uptime, доступность scrape target'ов, число соединений, active/idle/idle in transaction sessions, TPS, hit/read ratio, I/O latency, top queries, autovacuum activity, WAL generation, checkpoints, replication lag. Это тот минимум, который помогает увидеть и инфраструктуру, и поведение самой БД.</div>
+<div><strong>Ограничение внешнего мониторинга:</strong> графики почти всегда показывают агрегаты. Они отлично отвечают на вопрос «когда и насколько», но не всегда сразу отвечают на вопрос «какой именно запрос или backend виноват». Поэтому после графиков обычно переходят на уровень встроенных представлений PostgreSQL и точечных SQL-диагностик.</div>
 </div>
 <div class="stats-grid">
 <div class="stat-box">connections / max_connections</div>
@@ -867,30 +867,8 @@ sar -n DEV 1
 </div>
 <div class="card">
 <h3>Визуальный блок</h3>
-<div class="image-frame">
-<svg height="100%" viewbox="0 0 520 260" width="100%" xmlns="http://www.w3.org/2000/svg">
-<rect fill="#09131f" height="260" width="520"></rect>
-<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="128" x="24" y="30"></rect>
-<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="150" x="186" y="30"></rect>
-<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="122" x="374" y="30"></rect>
-<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="128" x="24" y="156"></rect>
-<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="122" x="199" y="156"></rect>
-<rect fill="#11233b" height="62" rx="18" ry="18" stroke="#3e5b86" width="122" x="374" y="156"></rect>
-<text fill="#dce8ff" text-anchor="middle" x="88" y="67">PostgreSQL</text>
-<text fill="#dce8ff" text-anchor="middle" x="261" y="67">postgres_exporter</text>
-<text fill="#dce8ff" text-anchor="middle" x="435" y="67">Prometheus</text>
-<text fill="#dce8ff" text-anchor="middle" x="88" y="193">Node exporter</text>
-<text fill="#dce8ff" text-anchor="middle" x="260" y="193">Grafana</text>
-<text fill="#dce8ff" text-anchor="middle" x="435" y="193">Alertmanager</text>
-<path d="M152 61 H186" stroke="#7aa7ff" stroke-width="3"></path>
-<path d="M336 61 H374" stroke="#7aa7ff" stroke-width="3"></path>
-<path d="M152 187 H210 V124 H435 V92" stroke="#4fe2bf" stroke-width="3" fill="none"></path>
-<path d="M435 92 V156" stroke="#ffc965" stroke-width="3"></path>
-<path d="M435 92 V124 H260 V156" stroke="#7aa7ff" stroke-width="3" fill="none"></path>
-<text fill="#8fa9d6" font-size="13" text-anchor="middle" x="260" y="240">Архитектура внешнего мониторинга и алертинга</text>
-</svg>
-</div>
-<div class="image-caption">Схема показывает типовой поток метрик: exporters публикуют их, Prometheus собирает, Grafana визуализирует, Alertmanager уведомляет о пороговых или аномальных состояниях.</div>
+<div class="image-frame"><img alt="Скриншот Grafana dashboard для PostgreSQL" src="https://grafana.com/api/dashboards/24298/images/19963/image" style="width:100%; height:100%; object-fit:cover; display:block; border-radius:18px;"/></div>
+<div class="image-caption">Пример внешнего дашборда Grafana: на одном экране собраны соединения, состояние instance и временные ряды нагрузки. Источник: <a href="https://grafana.com/grafana/dashboards/24298-postgresql-monitoring-dashboard/" rel="noreferrer" target="_blank">Grafana Labs</a>.</div>
 </div>
 <div class="card">
 <h3>Практический блок</h3>
@@ -964,7 +942,6 @@ sar -n DEV 1
 <div class="feedback"></div>
 </div>
 </div>
-
 <div class="text-quiz">
 <h4>Открытый вопрос</h4>
 <div class="text-question" data-answers="postgres_exporter|exporter" data-key="level2-open" data-success="Верно. Метрики наружу публикует exporter, в данном случае чаще всего postgres_exporter.">
@@ -998,11 +975,15 @@ sar -n DEV 1
 <div class="card">
 <h3>Теоретический блок</h3>
 <div class="list">
-<div><strong>pg_stat_activity</strong> показывает серверные процессы, состояние сессии, текущий SQL и <em>wait events</em>.</div>
-<div><strong>pg_stat_database</strong> даёт агрегированную статистику по транзакциям, чтениям, temp files, deadlocks и конфликтам.</div>
-<div><strong>pg_stat_io</strong> помогает анализировать чтения и записи по backend type, context и object.</div>
-<div><strong>pg_stat_progress_*</strong> показывает прогресс VACUUM, CREATE INDEX, COPY, ANALYZE и других долгих операций.</div>
-<div><strong>EXPLAIN (ANALYZE, BUFFERS)</strong> раскрывает реальный путь выполнения запроса.</div>
+<div><strong>Категория инструментов:</strong> встроенные представления статистики, системные вью PostgreSQL и средства анализа планов, доступные без сторонних расширений либо с минимальной встроенной конфигурацией. Это первый слой, где мы смотрим уже не на сервер вообще, а на текущее состояние самой СУБД.</div>
+<div><strong><code>pg_stat_activity</code>:</strong> главный источник информации о живых сессиях. Он показывает, какие backend'ы подключены, что они выполняют, каков их статус, сколько времени длится запрос, есть ли ожидание и какого типа оно природы. Через него обычно начинают разбор зависших запросов, блокировок, long transaction и очередей соединений.</div>
+<div><strong>Почему <code>wait_event</code> важнее простого статуса:</strong> сессия может быть «active», но при этом фактически ждать lock, WAL flush, client read/write или I/O. Поля <code>wait_event_type</code> и <code>wait_event</code> позволяют не путать вычислительную нагрузку с ожиданием внешнего ресурса. Это один из ключевых мостов между симптомом и гипотезой.</div>
+<div><strong><code>pg_stat_database</code> и родственные представления:</strong> дают агрегаты по базе: commits/rollbacks, block hits/reads, temp files, tuples returned/fetched и другие накопительные счётчики. Эти показатели хороши для оценки общего профиля нагрузки и для построения производных метрик, например доли чтений с диска против работы из буфера.</div>
+<div><strong>Буферный кэш и чтения:</strong> значения <code>blks_hit</code> и <code>blks_read</code> помогают понять, насколько рабочий набор помещается в память. Высокий hit ratio обычно означает, что чтения обслуживаются из shared buffers/OS cache, а всплеск реальных чтений с диска может объяснять рост latency без всякого изменения SQL-кода.</div>
+<div><strong><code>EXPLAIN</code> и <code>EXPLAIN (ANALYZE, BUFFERS)</code>:</strong> это инструмент уже не наблюдения, а подтверждения гипотезы. Он показывает, каким путём планировщик пошёл к результату, где ошибся в оценках, какие узлы дали основной вклад во время, были ли чтения из shared buffers или реальные disk reads. Именно здесь становится видно, почему конкретный запрос ест CPU или диск.</div>
+<div><strong>Как сочетать статистики и планы:</strong> сначала через <code>pg_stat_activity</code> и общие представления ищут симптом — long running query, lock wait, аномальный I/O. Затем уже для конкретного SQL проверяют план и фактические буферы. Такой порядок важен: без локализации легко анализировать не тот запрос и тратить время впустую.</div>
+<div><strong>Где встроенные средства особенно сильны:</strong> в разборе текущего состояния кластера: кто выполняется прямо сейчас, кто кого блокирует, есть ли idle in transaction, какие базы и таблицы наиболее активны, есть ли нетипичный рост disk reads. Они бесплатны по инфраструктуре и доступны почти в любом инстансе PostgreSQL.</div>
+<div><strong>Их ограничение:</strong> значительная часть встроенных статистик — накопительная или моментальная. Они плохо отвечают на вопрос «что было три часа назад», если вы не сохраняли снимки наружу. Поэтому встроенные представления часто используются вместе с внешним мониторингом и расширениями, которые дают более глубокую историю нагрузки.</div>
 </div>
 <div class="stats-grid">
 <div class="stat-box">state / wait_event</div>
@@ -1025,19 +1006,8 @@ ORDER BY runtime DESC;
  8121 | app     | active | IO              | DataFileRead     | 00:00:14
  8127 | app     | active | Lock            | transactionid    | 00:00:09</div>
 </div>
-<div class="image-frame" style="margin-top:12px;">
-<svg height="100%" viewbox="0 0 520 220" width="100%" xmlns="http://www.w3.org/2000/svg">
-<rect fill="#09131f" height="220" width="520"></rect>
-<text fill="#dce8ff" font-size="16" x="20" y="28">Разбор плана запроса</text>
-<rect fill="#102038" height="34" rx="12" stroke="#36527c" width="460" x="28" y="52"></rect>
-<text fill="#dce8ff" font-size="14" x="44" y="73">Limit  (actual time=0.311..0.325 rows=20 loops=1)</text>
-<rect fill="#11253f" height="34" rx="12" stroke="#45618f" width="392" x="62" y="102"></rect>
-<text fill="#dce8ff" font-size="14" x="78" y="123">Index Scan using idx_orders_customer_created</text>
-<rect fill="#16304f" height="34" rx="12" stroke="#5c82c7" width="312" x="102" y="152"></rect>
-<text fill="#dce8ff" font-size="14" x="118" y="173">Buffers: shared hit=48 read=2</text>
-</svg>
-</div>
-<div class="image-caption">В идеале actual rows и actual time должны быть предсказуемы, а неожиданный Seq Scan или сильное расхождение estimates с actual — повод копать статистику и индексы.</div>
+<div class="image-frame" style="margin-top:12px;"><img alt="Скриншот Activity Monitoring в pgAdmin" src="https://www.pgadmin.org/static/COMPILED/assets/img/screenshots/pgadmin4-activity.png" style="width:100%; height:100%; object-fit:cover; display:block; border-radius:18px;"/></div>
+<div class="image-caption">Экран Activity Monitoring в pgAdmin хорошо иллюстрирует идею живых сессий, wait events и текущей активности backend-процессов. Источник: <a href="https://www.pgadmin.org/screenshots/" rel="noreferrer" target="_blank">pgAdmin Screenshots</a>.</div>
 </div>
 <div class="card">
 <h3>Практический блок</h3>
@@ -1114,7 +1084,6 @@ LIMIT 20;
 <div class="feedback"></div>
 </div>
 </div>
-
 <div class="text-quiz">
 <h4>Открытый вопрос</h4>
 <div class="text-question" data-answers="pg_stat_activity" data-key="level3-open" data-success="Верно. pg_stat_activity — главная точка входа для разбора активных сессий и wait events.">
@@ -1148,11 +1117,14 @@ LIMIT 20;
 <div class="card">
 <h3>Теоретический блок</h3>
 <div class="list">
-<div><strong>pg_stat_statements</strong> агрегирует planning/execution statistics по нормализованным SQL и помогает найти тяжёлые запросы не по одному запуску, а по совокупному влиянию.</div>
-<div><strong>auto_explain</strong> автоматически пишет планы медленных запросов в лог, включая <code>ANALYZE</code> и буферы.</div>
-<div><strong>pgstattuple</strong> помогает оценить bloat таблиц и индексов, долю dead tuples и реальную плотность хранения.</div>
-<div><strong>pg_visibility</strong> показывает состояние visibility map и помогает понимать, насколько эффективно vacuum поддерживает видимость страниц.</div>
-<div><strong>pg_buffercache</strong> позволяет посмотреть, что именно держится в shared buffers.</div>
+<div><strong>Категория инструментов:</strong> расширения PostgreSQL, которые углубляют наблюдаемость: накапливают статистику по запросам, автоматически логируют планы, оценивают bloat и видимость страниц, добавляют I/O- и CPU-разрезы. Это уже не базовый комплект, а средства тонкой диагностики.</div>
+<div><strong><code>pg_stat_statements</code>:</strong> одно из самых ценных расширений для production-анализа. Оно агрегирует статистику по нормализованным SQL-выражениям и позволяет понять, какие классы запросов дают наибольший суммарный вклад во время, вызовы, чтения и записи. Это не инструмент «что выполняется прямо сейчас», а инструмент «какой тип нагрузки системно дорогой».</div>
+<div><strong>Чем оно отличается от <code>pg_stat_activity</code>:</strong> <code>pg_stat_activity</code> показывает моментальную картину активных сессий, а <code>pg_stat_statements</code> — накопленную историю по query class. Поэтому через первое удобно ловить текущий инцидент, а через второе — находить хронических потребителей ресурсов, которые медленно, но стабильно портят производительность.</div>
+<div><strong><code>auto_explain</code>:</strong> автоматически пишет планы медленных запросов в лог. Это полезно там, где проблемный SQL появляется редко, уже исчез к моменту ручного анализа или выполняется только в проде при особых параметрах. Тогда лог с планом становится единственным способом увидеть фактическое поведение запроса в бою.</div>
+<div><strong><code>pgstattuple</code> и related tools:</strong> помогают оценивать bloat, долю dead tuples и физическое распухание таблиц/индексов. Это важно, потому что деградация может быть вызвана не только плохим планом, но и накопившимся мусором, который увеличивает размер чтения, время vacuum и стоимость index scan.</div>
+<div><strong><code>pg_visibility</code>:</strong> даёт взгляд на visibility map и помогает понять, насколько таблица пригодна для index-only scan и как распределена видимость страниц. В расследовании проблем чтения это полезно, когда нужно объяснить, почему теоретически «лёгкий» план на практике всё равно ходит в heap.</div>
+<div><strong>Другие полезные расширения:</strong> <code>pg_stat_kcache</code> добавляет CPU/OS-метрики по запросам, <code>pg_wait_sampling</code> помогает анализировать ожидания во времени, а такие надстройки, как PoWA или PMM, строят поверх расширений исторические панели и удобные drill-down'ы. Но смысл у них один: опустить анализ с уровня общей нагрузки на уровень конкретных SQL-шаблонов.</div>
+<div><strong>Практический подход:</strong> сначала находят самые дорогие запросы по суммарному времени, вызовам, среднему времени и I/O-вкладу; потом выбирают проблемные query class; затем уже разбирают конкретные планы, индексы, кардинальности и bloat. Именно этот уровень часто даёт наибольшую отдачу при оптимизации прикладных SQL.</div>
 </div>
 <div class="stats-grid">
 <div class="stat-box">calls / total_exec_time</div>
@@ -1175,21 +1147,8 @@ query                      | calls | total_exec_time | mean_exec_time
 --------------------------+-------+-----------------+----------------
 SELECT ... orders ...     | 15420 | 92820 ms        | 6.0 ms</div>
 </div>
-<div class="image-frame" style="margin-top:12px;">
-<svg height="100%" viewbox="0 0 520 220" width="100%" xmlns="http://www.w3.org/2000/svg">
-<rect fill="#09131f" height="220" width="520"></rect>
-<text fill="#dce8ff" font-size="16" x="22" y="28">auto_explain и поиск bloat</text>
-<rect fill="#11233b" height="48" rx="14" stroke="#3d5983" width="220" x="26" y="50"></rect>
-<text fill="#dce8ff" text-anchor="middle" x="136" y="78">slow query log</text>
-<rect fill="#11233b" height="48" rx="14" stroke="#3d5983" width="220" x="274" y="50"></rect>
-<text fill="#dce8ff" text-anchor="middle" x="384" y="78">pgstattuple()</text>
-<path d="M136 98 V154" stroke="#4fe2bf" stroke-width="3"></path>
-<path d="M384 98 V154" stroke="#7aa7ff" stroke-width="3"></path>
-<rect fill="#16304f" height="44" rx="16" stroke="#5c82c7" width="328" x="82" y="154"></rect>
-<text fill="#dce8ff" text-anchor="middle" x="246" y="181">Тюнинг SQL, таблиц и индексов</text>
-</svg>
-</div>
-<div class="image-caption">Расширения особенно полезны там, где стандартные views показывают симптом, но не дают удобного агрегата по всей рабочей нагрузке или не раскрывают физическое состояние таблицы.</div>
+<div class="image-frame" style="margin-top:12px;"><img alt="Скриншот панели запросов PostgreSQL Queries Overview" src="https://grafana.com/api/dashboards/10017/images/6300/image" style="width:100%; height:100%; object-fit:cover; display:block; border-radius:18px;"/></div>
+<div class="image-caption">Панель с обзором запросов показывает смысл уровня расширений: агрегировать query class и искать самые дорогие SQL-шаблоны. Источник: <a href="https://grafana.com/grafana/dashboards/10017-postgresql-queries-overview/" rel="noreferrer" target="_blank">Grafana Labs</a>.</div>
 </div>
 <div class="card">
 <h3>Практический блок</h3>
@@ -1260,7 +1219,6 @@ SELECT * FROM pg_visibility_map_summary('public.orders');
 <div class="feedback"></div>
 </div>
 </div>
-
 <div class="text-quiz">
 <h4>Открытый вопрос</h4>
 <div class="text-question" data-answers="pg_visibility" data-key="level4-open" data-success="Да. Именно pg_visibility позволяет посмотреть состояние visibility map и страниц таблицы, то есть увидеть, какие страницы помечены как all_visible, а какие как all_frozen. Это важно в контексте проблемы переполнения счетчика transaction ID: PostgreSQL использует 32-битные XID, и если очень старые версии строк вовремя не “заморозить”, после переполнения старые транзакции могут начать интерпретироваться некорректно.">
@@ -1294,12 +1252,14 @@ SELECT * FROM pg_visibility_map_summary('public.orders');
 <div class="card">
 <h3>Теоретический блок</h3>
 <div class="list">
-<div><strong>WAL</strong> фиксирует изменения до записи в data files и помогает анализировать интенсивность записи и нагрузку на durability.</div>
-<div><strong>pg_stat_checkpointer</strong> показывает число scheduled/requested checkpoints и затраты времени на запись и синхронизацию.</div>
-<div><strong>pg_stat_bgwriter</strong> описывает поведение background writer и буферов.</div>
-<div><strong>Autovacuum</strong> нужен для очистки dead tuples, обновления visibility map и предотвращения transaction ID wraparound.</div>
-<div><strong>Replication</strong> требует контроля lag, активности sender/receiver и понимания, где именно возникает отставание: send/write/flush/replay.</div>
-<div><strong>Wait events</strong> показывают, что блокирует прогресс backend: lock, IO, LWLock, client, IPC и другие категории.</div>
+<div><strong>Категория инструментов:</strong> низкоуровневые статистики и внутренние механизмы PostgreSQL: WAL, checkpoints, autovacuum, wait events, репликация, фоновые writer-процессы. Это самый глубокий слой диагностики, где уже видно внутреннюю «механику» СУБД.</div>
+<div><strong>WAL:</strong> журнал предзаписи отражает все изменения данных до их попадания на постоянное хранение. Если система генерирует много WAL, это влияет и на диск, и на checkpoint pressure, и на репликацию. Поэтому при write-heavy нагрузке объём и скорость генерации WAL — один из ключевых сигналов.</div>
+<div><strong>Checkpoints:</strong> checkpoint закрепляет изменённые буферы на диске и ограничивает объём необходимого recovery. Слишком частые или тяжёлые checkpoints создают всплески записи и могут заметно ухудшать latency приложения. На графиках это часто выглядит как периодические пики write throughput и рост времени записи/синхронизации.</div>
+<div><strong>Autovacuum:</strong> нужен не только для освобождения пространства, но и для поддержания видимости строк, статистик и контроля над bloat. Если autovacuum не успевает, растут dead tuples, таблицы и индексы пухнут, возраст транзакций увеличивается, а читающие и пишущие запросы начинают работать на более тяжёлых данных.</div>
+<div><strong>Wait events:</strong> это детализированная модель ожиданий backend'ов. Она позволяет различать lock wait, I/O wait, ожидания клиента, WAL-related waits и другие внутренние паузы. Когда запрос «подвис», сами wait events часто лучше любого общего CPU-графика показывают, на чём именно он остановился.</div>
+<div><strong>Репликация и lag:</strong> отставание реплики — это не один показатель, а целая цепочка возможных задержек: генерация WAL на primary, отправка, запись, flush, replay на standby. Поэтому для диагностики важно не только заметить сам lag, но и понять, на каком этапе появляется торможение — сеть, диск реплики, replay-конфликт или нехватка ресурсов.</div>
+<div><strong>Почему этот слой нельзя смотреть в отрыве:</strong> всплеск WAL может быть вызван bulk update, отсутствием HOT-апдейтов, checkpoint tuning или проблемами приложения; autovacuum lag может быть связан с long transaction; wait events по типу <code>Lock</code> требуют разбора конкурентных сессий выше по стеку. Низкоуровневая телеметрия сильна тогда, когда её связывают с симптомами из внешнего мониторинга и SQL-статистик.</div>
+<div><strong>Практическая польза:</strong> именно этот уровень помогает объяснить «странные» случаи, когда CPU не забит, запросы вроде бы типовые, а latency всё равно скачет. Часто ответ кроется в том, что база в этот момент синхронно пишет WAL, упирается в checkpoint, ждёт lock, догоняет vacuum или не успевает реплицировать изменения.</div>
 </div>
 <div class="stats-grid">
 <div class="stat-box">wal_bytes / wal_records</div>
@@ -1310,30 +1270,7 @@ SELECT * FROM pg_visibility_map_summary('public.orders');
 </div>
 <div class="card">
 <h3>Визуальный блок</h3>
-<div class="image-frame">
-<svg height="100%" viewbox="0 0 520 260" width="100%" xmlns="http://www.w3.org/2000/svg">
-<rect fill="#09131f" height="260" width="520"></rect>
-<text fill="#dce8ff" font-size="16" x="22" y="28">Внутренний цикл записи и обслуживания</text>
-<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="112" x="24" y="48"></rect>
-<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="92" x="164" y="48"></rect>
-<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="104" x="284" y="48"></rect>
-<rect fill="#11233b" height="46" rx="16" ry="16" stroke="#42618c" width="84" x="412" y="48"></rect>
-<text fill="#dce8ff" text-anchor="middle" x="80" y="76">backend</text>
-<text fill="#dce8ff" text-anchor="middle" x="210" y="76">WAL</text>
-<text fill="#dce8ff" text-anchor="middle" x="336" y="76">checkpointer</text>
-<text fill="#dce8ff" text-anchor="middle" x="454" y="76">disk</text>
-<path d="M136 71 H164" stroke="#7aa7ff" stroke-width="3"></path>
-<path d="M256 71 H284" stroke="#4fe2bf" stroke-width="3"></path>
-<path d="M388 71 H412" stroke="#ffc965" stroke-width="3"></path>
-<rect fill="#11233b" height="52" rx="18" ry="18" stroke="#42618c" width="140" x="72" y="150"></rect>
-<rect fill="#11233b" height="52" rx="18" ry="18" stroke="#42618c" width="140" x="308" y="150"></rect>
-<text fill="#dce8ff" text-anchor="middle" x="142" y="182">autovacuum</text>
-<text fill="#dce8ff" text-anchor="middle" x="378" y="182">standby / replay</text>
-<path d="M210 94 V150" stroke="#4fe2bf" stroke-width="3"></path>
-<path d="M336 94 V150" stroke="#7aa7ff" stroke-width="3"></path>
-<text fill="#8fa9d6" font-size="13" text-anchor="middle" x="260" y="234">Здесь живут корневые причины burst write, bloat, wraparound-risk и replication lag</text>
-</svg>
-</div>
+<div class="image-frame"><img alt="Скриншот дашборда PostgreSQL Checkpoints and WAL Usage" src="https://grafana.com/api/dashboards/18758/images/14261/image" style="width:100%; height:100%; object-fit:cover; display:block; border-radius:18px;"/></div>
 <div class="screen" style="margin-top:12px;">
 <div class="screen-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
 <div class="screen-body">SELECT num_timed, num_requested, num_done,
@@ -1344,7 +1281,7 @@ FROM pg_stat_checkpointer;
 SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full
 FROM pg_stat_wal;</div>
 </div>
-<div class="image-caption">Низкоуровневые статистики особенно полезны, когда деградация периодическая: её часто вызывают не отдельные запросы, а циклические фоновые механизмы или нагрузка на WAL и storage.</div>
+<div class="image-caption">Пример дашборда по checkpoints и WAL: он помогает связать write spikes, checkpoint pressure и поведение внутренней телеметрии PostgreSQL. Источник: <a href="https://grafana.com/grafana/dashboards/18758-postgresql-checkpoints-and-wal-usage/" rel="noreferrer" target="_blank">Grafana Labs</a>.</div>
 </div>
 <div class="card">
 <h3>Практический блок</h3>
@@ -1418,7 +1355,6 @@ FROM pg_stat_replication;
 <div class="feedback"></div>
 </div>
 </div>
-
 <div class="text-quiz">
 <h4>Открытый вопрос</h4>
 <div class="text-question" data-answers="auto vacuum|auto-vacuum|autovacuum|vacuum" data-key="level5-open" data-success="Верно. За регулярную очистку dead tuples и поддержку видимости страниц отвечает autovacuum.">
@@ -1487,7 +1423,6 @@ FROM pg_stat_replication;
 </div>
 </div>
 </div>
-
 <div class="card case-lab-card" style="margin-top:18px;">
 <h3>Интерактивные задания по кейсам</h3>
 <p class="section-copy" style="margin-bottom:14px;">Ниже — задания, где нужно по симптомам догадаться, что проверять дальше. Выберите один вариант ответа, затем посмотрите короткое пояснение.</p>
@@ -1501,7 +1436,6 @@ FROM pg_stat_replication;
 </div>
 <div class="feedback"></div>
 </div>
-
 <div class="case-task" data-correct="2" data-key="case1-step2" data-success="Верно. Заметная доля dead tuples наводит на мысль о bloat и о том, что autovacuum может не успевать.">
 <p><strong>Кейс A, шаг 2.</strong> Вы посмотрели таблицу <code>orders</code>: dead tuples составляют примерно 10% её объёма. На какую гипотезу это наводит в первую очередь?</p>
 <div class="answers">
@@ -1511,7 +1445,6 @@ FROM pg_stat_replication;
 </div>
 <div class="feedback"></div>
 </div>
-
 <div class="case-task" data-correct="2" data-key="case1-step3" data-success="Да. После такой находки логичнее проверять autovacuum, bloat-метрики и подтверждать гипотезу через pgstattuple или прогресс vacuum.">
 <p><strong>Кейс A, шаг 3.</strong> Какой следующий шаг диагностики логичнее всего после такой находки?</p>
 <div class="answers">
@@ -1521,7 +1454,6 @@ FROM pg_stat_replication;
 </div>
 <div class="feedback"></div>
 </div>
-
 <div class="case-task" data-correct="2" data-key="case2-step1" data-success="Верно. Если send/write/flush почти не отстают, а replay lag высокий, проблема вероятнее на стороне standby во время применения WAL.">
 <p><strong>Кейс B, шаг 1.</strong> Реплика отстаёт. Send lag, write lag и flush lag почти нулевые, а replay lag высокий. Где вероятнее всего проблема?</p>
 <div class="answers">
@@ -1531,7 +1463,6 @@ FROM pg_stat_replication;
 </div>
 <div class="feedback"></div>
 </div>
-
 <div class="case-task" data-correct="2" data-key="case2-step2" data-success="Да. Для такой ситуации логично проверить локальный диск и I/O-поведение на standby: await, util, replay speed и нагрузку на storage.">
 <p><strong>Кейс B, шаг 2.</strong> Что стоит проверить в первую очередь после предыдущего шага?</p>
 <div class="answers">
@@ -1541,7 +1472,6 @@ FROM pg_stat_replication;
 </div>
 <div class="feedback"></div>
 </div>
-
 <div class="case-task" data-correct="2" data-key="case3-step1" data-success="Верно. При wait_event_type = Lock приоритетнее искать blocker и конкурирующие транзакции, а не уходить сразу в CPU-профилирование.">
 <p><strong>Кейс C.</strong> В <code>pg_stat_activity</code> активные запросы висят с <code>wait_event_type = Lock</code>. Какое направление расследования приоритетнее?</p>
 <div class="answers">
